@@ -1,0 +1,21 @@
+# 账务数据与运行时文件（数据不出库，禁止提交）
+server/vfund.db
+server/vfund.db-wal
+server/vfund.db-shm
+server/*.db-journal
+server/uploads/
+server/reports/
+server/server.log
+server/gotest.tmp
+server/vfund-server-go-tmp-umask
+
+# 编译产物
+server/vfund-server
+server/server
+
+# 前端依赖与构建产物
+web/node_modules/
+web/dist/
+
+# 系统文件
+.DS_Store

@@ -1,0 +1,183 @@
+<template>
+  <div>
+    <h2 style="margin: 0 0 16px">银行对账</h2>
+
+    <div class="panel">
+      <h3>导入银行流水</h3>
+      <div style="display: flex; gap: 10px; align-items: center">
+        <el-button type="primary" @click="fileRef.click()">选择 Excel/CSV 流水文件</el-button>
+        <input ref="fileRef" type="file" accept=".xlsx,.xls,.csv" style="display: none" @change="onFile" />
+        <span class="hint">列头：日期、金额、摘要（支出为负数或正数均可，按金额绝对值匹配）</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>流水列表</h3>
+      <el-radio-group v-model="fStatus" style="margin-bottom: 12px" @change="load">
+        <el-radio-button value="unmatched">未匹配（{{ counts.unmatched }}）</el-radio-button>
+        <el-radio-button value="matched">已匹配（{{ counts.matched }}）</el-radio-button>
+        <el-radio-button value="ignored">已忽略（{{ counts.ignored }}）</el-radio-button>
+        <el-radio-button value="">全部</el-radio-button>
+      </el-radio-group>
+      <el-table :data="list" size="small" border max-height="520">
+        <el-table-column prop="date" label="日期" width="110" />
+        <el-table-column prop="amount" label="金额" align="right" width="130" :formatter="moneyFmt" />
+        <el-table-column prop="summary" label="摘要" min-width="200" show-overflow-tooltip />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="{ unmatched: 'warning', matched: 'success', ignored: 'info' }[row.status]">
+              {{ { unmatched: '未匹配', matched: '已匹配', ignored: '已忽略' }[row.status] }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="匹配凭证" width="170">
+          <template #default="{ row }">{{ row.matchedVoucherId ? '凭证 #' + row.matchedVoucherId : '—' }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="140">
+          <template #default="{ row }">
+            <template v-if="row.status === 'unmatched'">
+              <el-button type="primary" size="small" link @click="openMatch(row)">对账</el-button>
+              <el-button size="small" link @click="ignore(row)">忽略</el-button>
+            </template>
+          </template>
+        </el-table-column>
+      </el-table>
+    </div>
+
+    <el-dialog v-model="matchVisible" title="银行对账：选择对应凭证" width="720">
+      <div class="hint" style="margin-bottom: 10px">
+        银行流水：{{ current?.date }}　金额 {{ fmtMoney(current?.amount) }}　{{ current?.summary }}<br />
+        以下为同金额的未匹配凭证（按日期接近排序），请选择与该笔流水对应的凭证：
+      </div>
+      <el-table :data="candidates" size="small" border max-height="360">
+        <el-table-column prop="date" label="日期" width="100" />
+        <el-table-column prop="no" label="凭证号" width="150" />
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">{{ TYPE_LABEL[row.type] }}</template>
+        </el-table-column>
+        <el-table-column prop="community" label="小区" width="110" />
+        <el-table-column label="户室/楼洞" min-width="110">
+          <template #default="{ row }">{{ row.roomNo || row.building || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="amount" label="金额" align="right" width="110" :formatter="moneyFmt" />
+        <el-table-column label="操作" width="80">
+          <template #default="{ row }">
+            <el-button type="primary" size="small" link @click="doMatch(row)">匹配</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="!candidates.length" class="hint" style="margin-top: 10px">
+        没有找到同金额的未匹配凭证——这笔流水可能是未达账项或利息，可先「忽略」或在凭证记账中补录后重新对账。
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import * as XLSX from 'xlsx'
+import { ElMessage } from 'element-plus'
+import api from '../api'
+
+const TYPE_LABEL = { income: '缴纳收入', expense: '维修支出', interest: '利息收入', allocate: '分摊到户' }
+const fileRef = ref(null)
+const list = ref([])
+const fStatus = ref('unmatched')
+const counts = ref({ unmatched: 0, matched: 0, ignored: 0 })
+const matchVisible = ref(false)
+const current = ref(null)
+const candidates = ref([])
+
+const moneyFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+async function load() {
+  list.value = await api.get('/bank/txns', { params: { status: fStatus.value } })
+  const all = await api.get('/bank/txns')
+  counts.value = {
+    unmatched: all.filter((x) => x.status === 'unmatched').length,
+    matched: all.filter((x) => x.status === 'matched').length,
+    ignored: all.filter((x) => x.status === 'ignored').length,
+  }
+}
+
+async function onFile(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  try {
+    let json = []
+    if (/\.(xlsx|xls)$/i.test(file.name)) {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf)
+      json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])
+    } else {
+      const buf = new Uint8Array(await file.arrayBuffer())
+      let text = new TextDecoder('utf-8').decode(buf)
+      if (text.includes('\uFFFD')) {
+        try { text = new TextDecoder('gbk').decode(buf) } catch { /* utf-8 */ }
+      }
+      const rows = text.split(/\r?\n/).filter((r) => r.trim())
+      if (rows.length < 2) throw new Error('没有数据行')
+      const header = rows[0].split(',').map((h) => h.trim())
+      const iD = header.findIndex((h) => h.includes('日期'))
+      const iA = header.findIndex((h) => h.includes('金额'))
+      const iS = header.findIndex((h) => h.includes('摘要'))
+      if (iD < 0 || iA < 0) throw new Error('缺少列头：日期/金额')
+      json = rows.slice(1).map((r) => {
+        const cols = r.split(',')
+        return { 日期: cols[iD], 金额: parseFloat(cols[iA]), 摘要: iS >= 0 ? cols[iS] : '' }
+      })
+    }
+    const rows = json.map((r) => {
+      let d = String(r['日期'] ?? '').trim()
+      const m = d.match(/^(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})日?$/)
+      if (m) d = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+      return { date: d, amount: Math.abs(Number(r['金额'] ?? 0)), summary: String(r['摘要'] ?? '') }
+    })
+    const res = await api.post('/bank/import', { rows })
+    let msg = `导入完成：${res.inserted} 笔`
+    if (res.skipped > 0) msg += `，跳过 ${res.skipped} 笔：\n` + res.errors.join('\n')
+    if (res.skipped > 0) ElMessage({ type: 'warning', message: msg, duration: 8000, showClose: true })
+    else ElMessage.success(msg)
+    load()
+  } catch (err) {
+    ElMessage.error('导入失败：' + err.message)
+  } finally {
+    e.target.value = ''
+  }
+}
+
+async function openMatch(row) {
+  current.value = row
+  candidates.value = await api.get('/bank/candidates', {
+    params: { date: row.date, amount: Math.abs(row.amount) },
+  })
+  matchVisible.value = true
+}
+
+async function doMatch(voucher) {
+  try {
+    await api.post(`/bank/txns/${current.value.id}/match`, { voucherId: voucher.id })
+    ElMessage.success(`已匹配凭证 ${voucher.no}`)
+    matchVisible.value = false
+    load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+async function ignore(row) {
+  try {
+    await api.post(`/bank/txns/${row.id}/ignore`)
+    ElMessage.success('已标记忽略')
+    load()
+  } catch (e) {
+    ElMessage.error(e.message)
+  }
+}
+
+onMounted(load)
+</script>
+
+<style scoped>
+.hint { font-size: 12px; color: #6a7280; }
+</style>
