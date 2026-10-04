@@ -105,6 +105,20 @@ func lockError(month string) string {
 	return ""
 }
 
+// HasUnclosedMonths 是否存在有业务发生但未结转的月份（桌面版关窗提示用）。
+func HasUnclosedMonths() bool {
+	if db == nil {
+		return false
+	}
+	var n int
+	db.QueryRow(`SELECT COUNT(*) FROM (
+		SELECT substr(date, 1, 7) AS m FROM vouchers WHERE status='normal'
+		UNION
+		SELECT month AS m FROM gl_vouchers WHERE kind='business' AND status='normal'
+	) WHERE m NOT IN (SELECT month FROM periods)`).Scan(&n)
+	return n > 0
+}
+
 // invalidateClosingTx 在改账事务内调用：清除某月的结转凭证与结转记录，
 // 并撤销其所在年度的年结记录（改账后需要重新结转/年结）。
 func invalidateClosingTx(tx *sql.Tx, month string) error {

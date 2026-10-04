@@ -1,0 +1,43 @@
+# Windows 桌面版自动出包：推送 v* 标签或手动触发（Actions → windows-build → Run workflow）
+name: windows-build
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 前端构建
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - name: 拷贝前端产物进桌面壳
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force desktop/webdist/dist -ErrorAction SilentlyContinue
+          Copy-Item -Recurse -Force web/dist desktop/webdist/dist
+
+      - name: 打包 exe（图标/版本信息由已提交的 resource_windows_amd64.syso 提供）
+        run: |
+          cd desktop
+          go build -ldflags "-H=windowsgui" -o vfund.exe .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vfund-windows
+          path: desktop/vfund.exe
