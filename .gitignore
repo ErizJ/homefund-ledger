@@ -23,3 +23,8 @@ web/dist/
 # 数据库备份与 vite 时间戳缓存
 server/vfund.db.bak-*
 web/vite.config.js.timestamp-*.mjs
+
+# 桌面版构建产物（webdist/dist 内仅保留 .gitkeep 占位，构建时从 web/dist 拷贝）
+desktop/vfund.exe
+desktop/webdist/dist/*
+!desktop/webdist/dist/.gitkeep

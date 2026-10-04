@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"database/sql"
@@ -35,8 +35,8 @@ func listCommunities(c *gin.Context) {
 
 func createCommunity(c *gin.Context) {
 	var req struct {
-		Name     string  `json:"name" binding:"required"`
-		FundType string  `json:"fundType"`
+		Name      string  `json:"name" binding:"required"`
+		FundType  string  `json:"fundType"`
 		FirstRate float64 `json:"firstRate"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -265,7 +265,7 @@ func listHouseholds(c *gin.Context) {
 			"id": id, "communityId": communityIDv, "community": community,
 			"building": building, "roomNo": room, "owner": owner,
 			"area": area, "openingBalance": centsToYuan(opening), "hasVoucher": hasVoucher,
-			"balance": centsToYuan(balance),
+			"balance":      centsToYuan(balance),
 			"firstPayment": centsToYuan(firstPayment), "belowThreshold": belowThreshold(balance, firstPayment),
 		})
 	}
@@ -597,21 +597,21 @@ func listVouchers(c *gin.Context) {
 }
 
 type createVoucherReq struct {
-	Type        string  `json:"type" binding:"required"`
-	Date        string  `json:"date" binding:"required"`
-	CommunityID int64   `json:"communityId" binding:"required"`
-	BuildingID  int64   `json:"buildingId"` // 0 表示未选；expense 且 scope=community 时为全体楼洞
-	Scope       string  `json:"scope"`      // expense 用：building | community | selected（指定多户）
-	HouseholdID int64   `json:"householdId"` // income / refund 用
+	Type         string  `json:"type" binding:"required"`
+	Date         string  `json:"date" binding:"required"`
+	CommunityID  int64   `json:"communityId" binding:"required"`
+	BuildingID   int64   `json:"buildingId"`   // 0 表示未选；expense 且 scope=community 时为全体楼洞
+	Scope        string  `json:"scope"`        // expense 用：building | community | selected（指定多户）
+	HouseholdID  int64   `json:"householdId"`  // income / refund 用
 	HouseholdIDs []int64 `json:"householdIds"` // expense 且 scope=selected 时的目标住户
-	Amount      float64 `json:"amount" binding:"required"`
-	Summary     string  `json:"summary"`
-	Category    string  `json:"category"` // expense 用：engineering|supervision|survey|other；refund 用：destroy|return
-	RefundKind  string  `json:"refundKind"`
-	PayMethod   string  `json:"payMethod"`   // expense 用：bank（默认）| cash（备用金支付）
-	IncomeKind  string  `json:"incomeKind"`  // fund_income 用：business|disposal|other
-	CashKind    string  `json:"cashKind"`    // cash 用：withdraw|return
-	BondKind    string  `json:"bondKind"`    // bond 用：buy|redeem
+	Amount       float64 `json:"amount" binding:"required"`
+	Summary      string  `json:"summary"`
+	Category     string  `json:"category"` // expense 用：engineering|supervision|survey|other；refund 用：destroy|return
+	RefundKind   string  `json:"refundKind"`
+	PayMethod    string  `json:"payMethod"`    // expense 用：bank（默认）| cash（备用金支付）
+	IncomeKind   string  `json:"incomeKind"`   // fund_income 用：business|disposal|other
+	CashKind     string  `json:"cashKind"`     // cash 用：withdraw|return
+	BondKind     string  `json:"bondKind"`     // bond 用：buy|redeem
 	BondInterest float64 `json:"bondInterest"` // bond redeem 时的利息部分
 	// ConfirmInsufficient 分摊目标中存在余额不足的户时，须前端二次确认后带 true 提交
 	ConfirmInsufficient bool `json:"confirmInsufficient"`
@@ -1136,11 +1136,11 @@ func createVoucher(c *gin.Context) {
 // POST /api/vouchers/expense-preview  维修支出分摊预览（保存前确认金额、户数、余额不足警告）
 func previewExpense(c *gin.Context) {
 	var req struct {
-		CommunityID int64   `json:"communityId" binding:"required"`
-		BuildingID  int64   `json:"buildingId"`
-		Scope       string  `json:"scope"`
+		CommunityID  int64   `json:"communityId" binding:"required"`
+		BuildingID   int64   `json:"buildingId"`
+		Scope        string  `json:"scope"`
 		HouseholdIDs []int64 `json:"householdIds"`
-		Amount      float64 `json:"amount" binding:"required"`
+		Amount       float64 `json:"amount" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.Amount <= 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误：communityId 与正数金额必填"})
@@ -1309,8 +1309,18 @@ func importVouchers(c *gin.Context) {
 		errs = errs[:20]
 	}
 	c.JSON(http.StatusOK, gin.H{"inserted": inserted, "skipped": skipped, "errors": errs,
-		"firstNo": func() string { if len(nos) > 0 { return nos[0] }; return "" }(),
-		"lastNo": func() string { if len(nos) > 0 { return nos[len(nos)-1] }; return "" }()})
+		"firstNo": func() string {
+			if len(nos) > 0 {
+				return nos[0]
+			}
+			return ""
+		}(),
+		"lastNo": func() string {
+			if len(nos) > 0 {
+				return nos[len(nos)-1]
+			}
+			return ""
+		}()})
 }
 
 // commitTxInvalidate 提交前使该月结转失效（改账后需重新结转），并提交事务

@@ -131,27 +131,37 @@ go build -o vfund-server .
 
 恢复 = 文件放回原位重启后端。
 
-## 七、目录结构
+## 七、桌面版（Windows）打包与同步
+
+本仓库采用"一套代码、两种运行方式"：日常开发保持前后端分离，交付使用时打包成纯 Windows 桌面软件（Wails 窗口 + 内嵌后端，数据在 exe 旁 `data/` 目录）。开发完成后的同步流程、开发守则、自动打包配置见 **[docs/桌面版同步指南.md](docs/桌面版同步指南.md)**。
+
+## 八、目录结构
 
 ```
 vfund-ledger/
+├── docs/                    # 文档（桌面版打包与同步指南）
+├── desktop/                 # 桌面版（Windows）壳：内嵌后端+前端，打包成独立 exe
+│   └── main.go              # Wails 窗口 + 启动内嵌 gin 服务（数据在 exe 旁 data/）
 ├── server/                  # Go 后端
-│   ├── main.go              # 入口、建表、迁移、路由
-│   ├── auth.go              # 登录/会话
-│   ├── settings.go          # 编制单位等设置
-│   ├── handlers.go          # 基础数据/业务凭证/批量导入/作废
-│   ├── ledger.go            # 四级账、汇总、对账单
-│   ├── gl.go                # 科目/汇总记账凭证/结转/总账/明细账
-│   ├── subjects_crud.go     # 会计科目自定义管理
-│   ├── periods.go           # 月末/年度结转与反结转
-│   ├── statements.go        # 会住维01/02/03表（分栏式、诊断）
-│   ├── statements_snapshot.go # 月结/年结财务报表快照 Excel
-│   ├── pdf_statement.go     # 三张报表 PDF 生成（嵌入 Noto Sans SC）
-│   ├── report.go            # 月报表 Excel
-│   ├── bank.go              # 银行对账、分户余额表
-│   ├── attachments.go       # 附件上传下载
-│   ├── assets/fonts/        # PDF 中文字体
-│   └── vfund.db             # SQLite 数据库（运行后生成，不入库）
+│   ├── main.go              # 命令行入口（开发模式）
+│   └── app/                 # 业务代码库（命令行与桌面版共用）
+│       ├── app.go           # Run()：启动完整服务
+│       ├── main.go          # 建表、迁移
+│       ├── auth.go          # 登录/会话
+│       ├── settings.go      # 编制单位等设置
+│       ├── handlers.go      # 基础数据/业务凭证/批量导入/作废
+│       ├── ledger.go        # 四级账、汇总、对账单
+│       ├── gl.go            # 科目/汇总记账凭证/结转/总账/明细账
+│       ├── subjects_crud.go # 会计科目自定义管理
+│       ├── periods.go       # 月末/年度结转与反结转
+│       ├── statements.go    # 会住维01/02/03表（分栏式、诊断）
+│       ├── statements_snapshot.go # 月结/年结财务报表快照 Excel
+│       ├── pdf_statement.go # 三张报表 PDF 生成（嵌入 Noto Sans SC）
+│       ├── report.go        # 月报表 Excel
+│       ├── bank.go          # 银行对账、分户余额表
+│       ├── attachments.go   # 附件上传下载
+│       ├── assets/fonts/    # PDF 中文字体
+│       └── vfund.db         # SQLite 数据库（运行后生成，不入库）
 └── web/                     # Vue3 前端
     └── src/
         ├── App.vue          # 布局/菜单/登录门

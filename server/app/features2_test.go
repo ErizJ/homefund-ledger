@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"encoding/json"
@@ -309,7 +309,6 @@ func TestStatementsPDF(t *testing.T) {
 	}
 }
 
-
 func TestVoidVoucherTrail(t *testing.T) {
 	newTestDB(t)
 	cid := seedCommunity(t, "作废留痕小区", "commercial")
@@ -416,7 +415,6 @@ func TestClosePeriodNoPL(t *testing.T) {
 }
 
 // ==================== 作废留痕（参数顺序回归测试） ====================
-
 
 func TestIncomeDuplicateGuard(t *testing.T) {
 	newTestDB(t)

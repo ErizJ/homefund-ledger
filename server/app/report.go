@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"fmt"
@@ -119,8 +119,8 @@ func generateMonthlyReport(month string) (string, error) {
 	mEnd := monthEnd(month)
 	yStart := month[:4] + "-01-01"
 
-	cm := collectAgg(mStart, mEnd)   // 本月
-	cy := collectAgg(yStart, mEnd)   // 本年累计
+	cm := collectAgg(mStart, mEnd) // 本月
+	cy := collectAgg(yStart, mEnd) // 本年累计
 
 	f := excelize.NewFile()
 	const shSummary = "汇总表"
@@ -328,10 +328,10 @@ func writeBuildingSheet(f *excelize.File, sheet, mStart, mEnd string) {
 	f.SetCellStyle(sheet, "A1", "I1", bold)
 
 	type bRow struct {
-		community, building             string
-		hhCount                         int
-		opening, inc, allocIn           int64
-		refund, alloc, closing          int64
+		community, building    string
+		hhCount                int
+		opening, inc, allocIn  int64
+		refund, alloc, closing int64
 	}
 	rows, err := db.Query(`
 		SELECT c.name, b.name, b.id,
@@ -419,8 +419,8 @@ func listMonthlyReports(c *gin.Context) {
 			continue
 		}
 		out = append(out, gin.H{
-			"name": e.Name(),
-			"size": info.Size(),
+			"name":     e.Name(),
+			"size":     info.Size(),
 			"modified": info.ModTime().Format("2006-01-02 15:04"),
 		})
 	}

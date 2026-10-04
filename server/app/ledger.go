@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"net/http"
@@ -24,7 +24,7 @@ func ledgerCommunities(c *gin.Context) {
 			+ IFNULL((SELECT SUM(CASE v.type WHEN 'income' THEN v.amount WHEN 'interest_alloc_child' THEN v.amount WHEN 'allocate' THEN -v.amount WHEN 'refund' THEN -v.amount ELSE 0 END)
 				FROM vouchers v JOIN households h2 ON v.household_id=h2.id JOIN buildings b2 ON h2.building_id=b2.id
 				WHERE b2.community_id=c.id AND v.status='normal'),0) AS households_balance,
-		c.public_opening + `+replaceAlias(publicDeltaExpr, "c")+` AS public_balance
+		c.public_opening + ` + replaceAlias(publicDeltaExpr, "c") + ` AS public_balance
 	FROM communities c ORDER BY c.name`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -158,7 +158,7 @@ func statsDashboard(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"households": households, "communities": communities,
 		"totalBalance": centsToYuan(totalBalance),
-		"todayIncome": centsToYuan(todayIncome), "todayExpense": centsToYuan(todayExpense),
+		"todayIncome":  centsToYuan(todayIncome), "todayExpense": centsToYuan(todayExpense),
 		"monthIncome": centsToYuan(monthIncome), "monthExpense": centsToYuan(monthExpense),
 		"today": today,
 	})
@@ -220,7 +220,7 @@ func reportCommunityStatement(c *gin.Context) {
 		FROM vouchers v WHERE v.community_id=? AND v.status='normal' AND v.date < ?),0)`
 	db.QueryRow(`SELECT
 		IFNULL((SELECT SUM(h.opening_balance) FROM households h JOIN buildings b ON h.building_id=b.id WHERE b.community_id=?),0)
-		+ ` + householdDeltaBefore + ` + ` + publicBefore + ` + ?`,
+		+ `+householdDeltaBefore+` + `+publicBefore+` + ?`,
 		cid, cid, year+"-01-01", cid, year+"-01-01", publicOpening).Scan(&opening)
 
 	// 本年六类发生额
@@ -271,12 +271,12 @@ func reportCommunityStatement(c *gin.Context) {
 		"allocate": centsToYuan(ya), "interest": centsToYuan(yint),
 		"refund": centsToYuan(yr), "publicOpening": centsToYuan(publicOpening),
 		"fundIncome": centsToYuan(yfi),
-		"months": months,
+		"months":     months,
 	})
 }
 
 func summaryBy(c *gin.Context, groupExpr string, limit int) {
-	rows, err := db.Query(`SELECT ` + groupExpr + ` AS g,
+	rows, err := db.Query(`SELECT `+groupExpr+` AS g,
 		IFNULL(SUM(CASE WHEN type='income' THEN amount END),0),
 		IFNULL(SUM(CASE WHEN type='expense' THEN amount END),0),
 		IFNULL(SUM(CASE WHEN type='interest' THEN amount END),0),

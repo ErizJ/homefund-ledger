@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"errors"
@@ -21,8 +21,8 @@ func TestCloseMonthTx(t *testing.T) {
 		wantBankB    int64
 	}{
 		{
-			name: "商业小区：缴存+维修支出+利息",
-			fund: "commercial",
+			name:         "商业小区：缴存+维修支出+利息",
+			fund:         "commercial",
 			wantNetAsset: "3001", wantPending: "310101", wantBank: "100101",
 			// 期初 70000 元 + 收入 150000 元 - 支出 50000 元 = 170000 元
 			wantNet: 17000000,
@@ -32,8 +32,8 @@ func TestCloseMonthTx(t *testing.T) {
 			wantBankB: 17050000,
 		},
 		{
-			name: "公有住房：结转路由到公房科目",
-			fund: "public",
+			name:         "公有住房：结转路由到公房科目",
+			fund:         "public",
 			wantNetAsset: "3002", wantPending: "310102", wantBank: "100102",
 			// 期初 70000 元（公房期初建账）+ 收入 100000 元 = 170000 元 → 3002
 			wantNet: 17000000,

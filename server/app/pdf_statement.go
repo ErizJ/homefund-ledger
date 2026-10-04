@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -173,8 +173,8 @@ func isDataRows(month, year string) ([][]string, string, string, error) {
 		pdfMoney(centsToYuan(eC.comm)), pdfMoney(centsToYuan(eC.pub)), pdfMoney(centsToYuan(eC.total)),
 		pdfMoney(centsToYuan(eM.comm)), pdfMoney(centsToYuan(eM.pub)), pdfMoney(centsToYuan(eM.total))})
 	rows = append(rows, []string{"三、本期收支差额",
-		pdfMoney(centsToYuan(iC.comm-eC.comm)), pdfMoney(centsToYuan(iC.pub-eC.pub)), pdfMoney(centsToYuan(iC.total-eC.total)),
-		pdfMoney(centsToYuan(iM.comm-eM.comm)), pdfMoney(centsToYuan(iM.pub-eM.pub)), pdfMoney(centsToYuan(iM.total-eM.total))})
+		pdfMoney(centsToYuan(iC.comm - eC.comm)), pdfMoney(centsToYuan(iC.pub - eC.pub)), pdfMoney(centsToYuan(iC.total - eC.total)),
+		pdfMoney(centsToYuan(iM.comm - eM.comm)), pdfMoney(centsToYuan(iM.pub - eM.pub)), pdfMoney(centsToYuan(iM.total - eM.total))})
 	curLabel, cumLabel := "本月数", "本年累计数"
 	if annual {
 		curLabel, cumLabel = "本年数", "上年数"

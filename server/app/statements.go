@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"net/http"
@@ -447,7 +447,7 @@ func glIncomeStatement(c *gin.Context) {
 		curLabel, cumLabel = "本年数", "上年数"
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"mode": map[bool]string{true: "year", false: "month"}[annual],
+		"mode":  map[bool]string{true: "year", false: "month"}[annual],
 		"month": month, "year": year, "title": title, "org": orgName(),
 		"curLabel": curLabel, "cumLabel": cumLabel,
 		"income": isJSON(inc), "expense": isJSON(exp),

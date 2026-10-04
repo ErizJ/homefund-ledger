@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"database/sql"
@@ -232,20 +232,20 @@ func reopenPeriod(c *gin.Context) {
 func voucherDetail(c *gin.Context) {
 	id := c.Param("id")
 	var v struct {
-		id, communityID          int64
-		no, date, vtype          string
-		buildingID, householdID  sql.NullInt64
-		building, room, owner    sql.NullString
-		amount                   int64
-		summary                  sql.NullString
-		masterID                 sql.NullInt64
-		status                   string
-		community                string
-		refundKind               string
-		bizKind                  string
-		createdBy                string
-		voidedBy                 string
-		voidReason               string
+		id, communityID         int64
+		no, date, vtype         string
+		buildingID, householdID sql.NullInt64
+		building, room, owner   sql.NullString
+		amount                  int64
+		summary                 sql.NullString
+		masterID                sql.NullInt64
+		status                  string
+		community               string
+		refundKind              string
+		bizKind                 string
+		createdBy               string
+		voidedBy                string
+		voidReason              string
 	}
 	err := db.QueryRow(`SELECT v.id, v.community_id, v.no, v.date, v.type, v.building_id, b.name, v.household_id,
 		h.room_no, h.owner, v.amount, v.summary, v.master_id, v.status, c.name, v.refund_kind, v.biz_kind,

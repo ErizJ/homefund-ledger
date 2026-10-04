@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"bytes"
@@ -132,8 +132,8 @@ func TestRefundFlow(t *testing.T) {
 	}
 	seedOpeningGL(t, tx, "2026-01-01", cid, "commercial", 1000000)
 	seedBizVoucher(t, tx, "2026-09-05", "income", cid, h1, 5000000, "", "缴存")
-	seedRefund(t, tx, "2026-09-10", "return", cid, h1, 2000000)   // 退返 20000 元
-	seedRefund(t, tx, "2026-09-15", "destroy", cid, h1, 1000000)  // 灭失返还 10000 元
+	seedRefund(t, tx, "2026-09-10", "return", cid, h1, 2000000)  // 退返 20000 元
+	seedRefund(t, tx, "2026-09-15", "destroy", cid, h1, 1000000) // 灭失返还 10000 元
 	if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 		t.Fatalf("closeMonthTx: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestPreviewExpenseInsufficient(t *testing.T) {
 	newTestDB(t)
 	cid := seedCommunity(t, "预览小区", "commercial")
 	bid := seedBuilding(t, cid, "1栋")
-	seedHousehold(t, bid, "101", 100, 100000) // 期初 1000 元
+	seedHousehold(t, bid, "101", 100, 100000)  // 期初 1000 元
 	seedHousehold(t, bid, "102", 100, 5000000) // 期初 50000 元
 
 	// 分摊 3000 元：101 户分摊 1500 元 > 余额 1000 元，不足 500 元

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"database/sql"
@@ -410,7 +410,11 @@ func rebuildCommunityDayGL(tx *sqlTx, communityID int64, date string, createdBy 
 		return nil
 	}
 
-	type aggKey struct{ subject string; project int64; dir string }
+	type aggKey struct {
+		subject string
+		project int64
+		dir     string
+	}
 	agg := map[aggKey]int64{}
 	order := []aggKey{}
 	typeCount := map[string]int{}
@@ -622,7 +626,7 @@ func glEntries(c *gin.Context) {
 		out = append(out, gin.H{
 			"subject": code, "subjectName": name, "project": project,
 			"debit": centsToYuan(debit), "credit": centsToYuan(credit),
-			"net": centsToYuan(debit-credit), "count": cnt,
+			"net": centsToYuan(debit - credit), "count": cnt,
 		})
 	}
 	c.JSON(http.StatusOK, out)
@@ -755,7 +759,7 @@ func glReconcile(c *gin.Context) {
 		out = append(out, gin.H{
 			"communityId": cm.id, "community": cm.name, "fundType": cm.fundType,
 			"glNetAsset": centsToYuan(glNet), "bizHousehold": centsToYuan(bizHousehold),
-			"netDiff": centsToYuan(glNet - bizHousehold),
+			"netDiff":   centsToYuan(glNet - bizHousehold),
 			"glPending": centsToYuan(glPending), "bizPublic": centsToYuan(bizPublic),
 			"pendingDiff": centsToYuan(glPending - bizPublic),
 			"glBank":      centsToYuan(glBank),
@@ -1204,10 +1208,10 @@ func glGeneralLedger(c *gin.Context) {
 		}
 		out = append(out, gin.H{
 			"code": s.code, "name": s.name, "type": s.typ, "dir": dir,
-			"opening":  centsToYuan(balFn(a.openD, a.openC)),
-			"debit":    centsToYuan(a.cumD - a.openD),
-			"credit":   centsToYuan(a.cumC - a.openC),
-			"closing":  centsToYuan(balFn(a.cumD, a.cumC)),
+			"opening": centsToYuan(balFn(a.openD, a.openC)),
+			"debit":   centsToYuan(a.cumD - a.openD),
+			"credit":  centsToYuan(a.cumC - a.openC),
+			"closing": centsToYuan(balFn(a.cumD, a.cumC)),
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"month": month, "rows": out})
