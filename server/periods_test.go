@@ -70,7 +70,7 @@ func TestCloseMonthTx(t *testing.T) {
 				seedBizVoucher(t, tx, "2026-09-05", "income", cid, h1, 10000000, "", "缴存")
 				seedBizVoucher(t, tx, "2026-09-20", "interest", cid, 0, 20000, "", "存款利息")
 			}
-			if err := closeMonthTx(tx, "2026-09"); err != nil {
+			if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 				t.Fatalf("closeMonthTx: %v", err)
 			}
 			if err := tx.Commit(); err != nil {
@@ -118,15 +118,15 @@ func TestCloseMonthTxNoActivity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err := closeMonthTx(tx, "2026-08"); !errors.Is(err, errNothingToClose) {
+	if err := closeMonthTx(tx, "2026-08", "test"); !errors.Is(err, errNothingToClose) {
 		t.Fatalf("closeMonthTx 无发生额应返回 errNothingToClose，got %v", err)
 	}
 }
 
-// TestCloseMonthTxIdempotent 重复月结报错（periods 主键冲突），不允许二次锁账。
+// TestCloseMonthTxIdempotent 重复结转幂等：清除旧结转后按最新账目重新生成，仅保留 1 张结转凭证
 func TestCloseMonthTxIdempotent(t *testing.T) {
 	newTestDB(t)
-	cid := seedCommunity(t, "重复月结", "commercial")
+	cid := seedCommunity(t, "重复结转", "commercial")
 	bid := seedBuilding(t, cid, "1栋")
 	h1 := seedHousehold(t, bid, "101", 100, 0)
 
@@ -135,7 +135,7 @@ func TestCloseMonthTxIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedBizVoucher(t, tx, "2026-09-05", "income", cid, h1, 1000000, "", "缴存")
-	if err := closeMonthTx(tx, "2026-09"); err != nil {
+	if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 		t.Fatalf("closeMonthTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -147,8 +147,20 @@ func TestCloseMonthTxIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx2.Rollback()
-	if err := closeMonthTx(tx2, "2026-09"); err == nil {
-		t.Fatal("重复月结应报错")
+	if err := closeMonthTx(tx2, "2026-09", "test"); err != nil {
+		t.Fatalf("重复结转应幂等成功: %v", err)
+	}
+	if err := tx2.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	var cnt int
+	db.QueryRow(`SELECT COUNT(*) FROM gl_vouchers WHERE kind='closing' AND month='2026-09'`).Scan(&cnt)
+	if cnt != 1 {
+		t.Fatalf("重复结转后结转凭证应为 1 张，got %d", cnt)
+	}
+	db.QueryRow(`SELECT COUNT(*) FROM periods WHERE month='2026-09'`).Scan(&cnt)
+	if cnt != 1 {
+		t.Fatalf("periods 记录应为 1 条，got %d", cnt)
 	}
 }
 
@@ -165,7 +177,7 @@ func TestReopenMonthTx(t *testing.T) {
 	}
 	seedBizVoucher(t, tx, "2026-09-05", "income", cid, h1, 10000000, "", "缴存")
 	seedBizVoucher(t, tx, "2026-09-10", "expense", cid, 0, 5000000, "engineering", "维修")
-	if err := closeMonthTx(tx, "2026-09"); err != nil {
+	if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 		t.Fatalf("closeMonthTx: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

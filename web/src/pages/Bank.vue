@@ -79,7 +79,11 @@ import * as XLSX from 'xlsx'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 
-const TYPE_LABEL = { income: '缴纳收入', expense: '维修支出', interest: '利息收入', allocate: '分摊到户' }
+const TYPE_LABEL = {
+  income: '缴纳收入', expense: '维修支出', interest: '利息收入', allocate: '分摊到户',
+  refund: '返还/退返', interest_alloc: '收益分配', interest_alloc_child: '收益分配',
+  fund_income: '其他收入', cash: '备用金', bond: '国债投资',
+}
 const fileRef = ref(null)
 const list = ref([])
 const fStatus = ref('unmatched')

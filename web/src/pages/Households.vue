@@ -26,9 +26,13 @@
         <el-table-column prop="area" label="建筑面积" width="110" align="right">
           <template #default="{ row }">{{ Number(row.area).toFixed(2) }} ㎡</template>
         </el-table-column>
-        <el-table-column label="当前余额" width="140" align="right">
+        <el-table-column label="当前余额" width="190" align="right">
           <template #default="{ row }">
             <span class="money">¥ {{ fmt(row.balance) }}</span>
+            <el-tooltip v-if="row.belowThreshold" placement="top"
+              :content="`余额低于首期交存额（¥ ${fmt(row.firstPayment)}）的 30%，按规定应续筹`">
+              <el-tag type="danger" size="small" style="margin-left: 6px">低于30%</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="170">
@@ -96,18 +100,16 @@
         <h4 style="margin: 18px 0 10px">历史收支（余额 = 期初逐笔累计）</h4>
         <el-table :data="stmt.lines" size="small" border max-height="480">
           <el-table-column prop="date" label="日期" width="100" />
-          <el-table-column label="类型" width="90">
+          <el-table-column label="类型" width="100">
             <template #default="{ row }">
-              <el-tag :type="row.type === 'income' ? 'danger' : 'warning'" size="small">
-                {{ row.type === 'income' ? '缴纳' : '维修分摊' }}
-              </el-tag>
+              <el-tag :type="lineTag(row.type)" size="small">{{ lineLabel(row.type) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="summary" label="摘要" min-width="150" show-overflow-tooltip />
           <el-table-column label="金额" width="110" align="right">
             <template #default="{ row }">
-              <span :style="{ color: row.type === 'income' ? '#a32d2d' : '#3b6d11' }">
-                {{ row.type === 'income' ? '+' : '−' }}{{ fmt(row.amount) }}
+              <span :style="{ color: lineColor(row.type) }">
+                {{ lineSign(row.type) }}{{ fmt(row.amount) }}
               </span>
             </template>
           </el-table-column>
@@ -147,6 +149,13 @@ const stmt = ref(null)
 function fmt(n) {
   return Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+
+const LINE_LABEL = { income: '缴纳', interest_alloc_child: '利息分配', allocate: '维修分摊', refund: '返还/退返' }
+const lineLabel = (t) => LINE_LABEL[t] || t
+const linePlus = (t) => t === 'income' || t === 'interest_alloc_child'
+const lineTag = (t) => (linePlus(t) ? 'danger' : 'warning')
+const lineColor = (t) => (linePlus(t) ? '#a32d2d' : '#3b6d11')
+const lineSign = (t) => (linePlus(t) ? '+' : '−')
 
 async function loadList() {
   const params = {}

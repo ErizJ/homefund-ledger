@@ -29,6 +29,9 @@ type monthAgg struct {
 	opening        int64
 	income         int64
 	interest       int64
+	fundIncome     int64
+	refundReturn   int64
+	refundDestroy  int64
 	expEngineering int64
 	expSupervision int64
 	expDetection   int64
@@ -36,19 +39,26 @@ type monthAgg struct {
 }
 
 // collectAgg 汇总 [from, to] 区间的发生额与期初（期初 = date < from 的累计）。
-// 口径：户账（期初建账+缴存-分摊）+ 公共账（利息）= 基金总额。
+// 口径：户账（期初建账+缴存+利息分配-分摊-返还）+ 公共账（公共账期初+利息+其他收入-已分配收益）= 基金总额；
+// 收益分配为公共账→户账的内部结转，汇总层面相互抵消。
 func collectAgg(from, to string) monthAgg {
 	var a monthAgg
-	// 期初
-	var openSum int64
+	// 期初 = 户账期初 + 公共账期初 + 期前缴存 - 期前分摊 + 期前利息 + 期前其他收入 - 期前返还
+	var openSum, publicOpenSum int64
 	db.QueryRow(`SELECT IFNULL(SUM(opening_balance),0) FROM households`).Scan(&openSum)
+	db.QueryRow(`SELECT IFNULL(SUM(public_opening),0) FROM communities`).Scan(&publicOpenSum)
 	incB := sumVouchers("type='income' AND date < ?", from)
 	allocB := sumVouchers("type='allocate' AND date < ?", from)
 	intB := sumVouchers("type='interest' AND date < ?", from)
-	a.opening = openSum + incB - allocB + intB
+	fiB := sumVouchers("type='fund_income' AND date < ?", from)
+	refundB := sumVouchers("type='refund' AND date < ?", from)
+	a.opening = openSum + publicOpenSum + incB - allocB + intB + fiB - refundB
 	// 本期收入
 	a.income = sumVouchers("type='income' AND date >= ? AND date <= ?", from, to)
 	a.interest = sumVouchers("type='interest' AND date >= ? AND date <= ?", from, to)
+	a.fundIncome = sumVouchers("type='fund_income' AND date >= ? AND date <= ?", from, to)
+	a.refundReturn = sumVouchers("type='refund' AND refund_kind='return' AND date >= ? AND date <= ?", from, to)
+	a.refundDestroy = sumVouchers("type='refund' AND refund_kind='destroy' AND date >= ? AND date <= ?", from, to)
 	// 本期支出：按主凭证费用类别
 	rows, err := db.Query(`
 		SELECT COALESCE(NULLIF(v.expense_category,''),'other'), IFNULL(SUM(v.amount),0)
@@ -77,7 +87,17 @@ func collectAgg(from, to string) monthAgg {
 }
 
 func (a monthAgg) expense() int64 {
-	return a.expEngineering + a.expSupervision + a.expDetection + a.expOther
+	return a.expEngineering + a.expSupervision + a.expDetection + a.expOther + a.refundDestroy
+}
+
+// incomeNet 缴存净额 = 缴存 - 退返
+func (a monthAgg) incomeNet() int64 {
+	return a.income - a.refundReturn
+}
+
+// otherIncome 其他收入合计 = 经营/共用设施处置/其他收入
+func (a monthAgg) otherIncome() int64 {
+	return a.fundIncome
 }
 
 var expenseCatLabel = map[string]string{
@@ -125,46 +145,48 @@ func generateMonthlyReport(month string) (string, error) {
 	set(shSummary, "A5", "期初结余")
 	set(shSummary, "A6", "本期收入小计")
 	set(shSummary, "A7", "  业主缴存")
-	set(shSummary, "A8", "  利息收入")
-	set(shSummary, "A9", "  其他收入")
-	set(shSummary, "A10", "本期支出小计")
-	set(shSummary, "A11", "  "+expenseCatLabel["engineering"])
-	set(shSummary, "A12", "  "+expenseCatLabel["supervision"])
-	set(shSummary, "A13", "  "+expenseCatLabel["detection"])
-	set(shSummary, "A14", "  "+expenseCatLabel["other"])
-	set(shSummary, "A15", "期末结余")
-	f.SetCellStyle(shSummary, "A15", "A15", bold)
+	set(shSummary, "A8", "  减：退返交存")
+	set(shSummary, "A9", "  利息收入")
+	set(shSummary, "A10", "  其他收入")
+	set(shSummary, "A11", "本期支出小计")
+	set(shSummary, "A12", "  "+expenseCatLabel["engineering"])
+	set(shSummary, "A13", "  "+expenseCatLabel["supervision"])
+	set(shSummary, "A14", "  "+expenseCatLabel["detection"])
+	set(shSummary, "A15", "  "+expenseCatLabel["other"])
+	set(shSummary, "A16", "  灭失返还")
+	set(shSummary, "A17", "期末结余")
+	f.SetCellStyle(shSummary, "A17", "A17", bold)
 
 	// 本月列
 	set(shSummary, "B5", centsToYuan(cm.opening))
 	set(shSummary, "B7", centsToYuan(cm.income))
-	set(shSummary, "B8", centsToYuan(cm.interest))
-	set(shSummary, "B9", 0)
-	set(shSummary, "B11", centsToYuan(cm.expEngineering))
-	set(shSummary, "B12", centsToYuan(cm.expSupervision))
-	set(shSummary, "B13", centsToYuan(cm.expDetection))
-	set(shSummary, "B14", centsToYuan(cm.expOther))
+	set(shSummary, "B8", centsToYuan(cm.refundReturn))
+	set(shSummary, "B9", centsToYuan(cm.interest))
+	set(shSummary, "B10", centsToYuan(cm.fundIncome))
+	set(shSummary, "B12", centsToYuan(cm.expEngineering))
+	set(shSummary, "B13", centsToYuan(cm.expSupervision))
+	set(shSummary, "B14", centsToYuan(cm.expDetection))
+	set(shSummary, "B15", centsToYuan(cm.expOther))
+	set(shSummary, "B16", centsToYuan(cm.refundDestroy))
 	// 本年累计列
 	set(shSummary, "C5", centsToYuan(cy.opening))
 	set(shSummary, "C7", centsToYuan(cy.income))
-	set(shSummary, "C8", centsToYuan(cy.interest))
-	set(shSummary, "C9", 0)
-	set(shSummary, "C11", centsToYuan(cy.expEngineering))
-	set(shSummary, "C12", centsToYuan(cy.expSupervision))
-	set(shSummary, "C13", centsToYuan(cy.expDetection))
-	set(shSummary, "C14", centsToYuan(cy.expOther))
-	// 活公式：小计与期末
-	for col, m := range map[string]monthAgg{"B": cm, "C": cy} {
-		if m.income == 0 && m.interest == 0 {
-			continue
-		}
-		_ = m
-		f.SetCellFormula(shSummary, col+"6", fmt.Sprintf("=SUM(%s7:%s9)", col, col))
-		f.SetCellFormula(shSummary, col+"10", fmt.Sprintf("=SUM(%s11:%s14)", col, col))
-		f.SetCellFormula(shSummary, col+"15", fmt.Sprintf("=%s5+%s6-%s10", col, col, col))
+	set(shSummary, "C8", centsToYuan(cy.refundReturn))
+	set(shSummary, "C9", centsToYuan(cy.interest))
+	set(shSummary, "C10", centsToYuan(cy.fundIncome))
+	set(shSummary, "C12", centsToYuan(cy.expEngineering))
+	set(shSummary, "C13", centsToYuan(cy.expSupervision))
+	set(shSummary, "C14", centsToYuan(cy.expDetection))
+	set(shSummary, "C15", centsToYuan(cy.expOther))
+	set(shSummary, "C16", centsToYuan(cy.refundDestroy))
+	// 活公式：小计与期末（无条件写入，避免纯支出月份期末结余为空）
+	for _, col := range []string{"B", "C"} {
+		f.SetCellFormula(shSummary, col+"6", fmt.Sprintf("=%s7-%s8+%s9+%s10", col, col, col, col))
+		f.SetCellFormula(shSummary, col+"11", fmt.Sprintf("=SUM(%s12:%s16)", col, col))
+		f.SetCellFormula(shSummary, col+"17", fmt.Sprintf("=%s5+%s6-%s11", col, col, col))
 	}
-	f.SetCellStyle(shSummary, "B15", "C15", bold)
-	set(shSummary, "A17", "口径说明：户账（期初建账+缴存-维修分摊）+ 公共账（利息收入）= 基金总额；利息不向住户分摊。")
+	f.SetCellStyle(shSummary, "B17", "C17", bold)
+	set(shSummary, "A19", "口径说明：基金总额 = 户账（期初建账+缴存+利息分配-维修分摊-返还）+ 公共账（公共账期初+利息-已分配利息）；退返冲减缴存收入，灭失返还计入支出。")
 	f.SetColWidth(shSummary, "A", "A", 42)
 	f.SetColWidth(shSummary, "B", "C", 14)
 
@@ -190,7 +212,7 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 	set := func(cell string, v interface{}) { f.SetCellValue(sheet, cell, v) }
 
 	if vtype == "income" {
-		set("A1", "收入明细（缴存 + 利息）")
+		set("A1", "收入明细（缴存 + 利息 + 其他收入 + 退返）")
 		f.SetCellStyle(sheet, "A1", "A1", bold)
 		for i, h := range []string{"日期", "凭证号", "小区", "楼洞", "户号/户主", "类型", "金额", "摘要"} {
 			cell, _ := excelize.CoordinatesToCellName(i+1, 2)
@@ -198,14 +220,15 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 		}
 		f.SetCellStyle(sheet, "A2", "H2", bold)
 		rows, err := db.Query(`
-			SELECT v.date, v.no, c.name, IFNULL(b.name,''), 
+			SELECT v.date, v.no, c.name, IFNULL(b.name,''),
 				CASE WHEN h.id IS NULL THEN '' ELSE h.room_no || ' ' || h.owner END,
 				v.type, v.amount, v.summary
 			FROM vouchers v
 			JOIN communities c ON v.community_id = c.id
 			LEFT JOIN buildings b ON v.building_id = b.id
 			LEFT JOIN households h ON v.household_id = h.id
-			WHERE v.status='normal' AND v.type IN ('income','interest') AND v.date >= ? AND v.date <= ?
+			WHERE v.status='normal' AND (v.type IN ('income','interest','fund_income') OR (v.type='refund' AND v.refund_kind='return'))
+			  AND v.date >= ? AND v.date <= ?
 			ORDER BY v.date, v.no`, mStart, mEnd)
 		if err != nil {
 			return 2
@@ -219,6 +242,10 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 			typ := "缴存"
 			if vt == "interest" {
 				typ = "利息"
+			} else if vt == "refund" {
+				typ = "退返"
+			} else if vt == "fund_income" {
+				typ = "其他收入"
 			}
 			vals := []interface{}{date, no, community, building, household, typ, centsToYuan(amount), summary}
 			for i, v := range vals {
@@ -237,8 +264,8 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 		return r
 	}
 
-	// 支出明细
-	set("A1", "支出明细（维修支出）")
+	// 支出明细（维修支出 + 灭失返还）
+	set("A1", "支出明细（维修支出 + 灭失返还）")
 	f.SetCellStyle(sheet, "A1", "A1", bold)
 	for i, h := range []string{"日期", "凭证号", "小区", "楼洞", "费用类别", "金额", "维修项目/摘要", "经办"} {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 2)
@@ -247,11 +274,13 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 	f.SetCellStyle(sheet, "A2", "H2", bold)
 	rows, err := db.Query(`
 		SELECT v.date, v.no, c.name, IFNULL(b.name,'全体楼洞'),
-			COALESCE(NULLIF(v.expense_category,''),'other'), v.amount, v.summary
+			COALESCE(NULLIF(v.expense_category,''),'other'), v.amount, v.summary,
+			v.refund_kind
 		FROM vouchers v
 		JOIN communities c ON v.community_id = c.id
 		LEFT JOIN buildings b ON v.building_id = b.id
-		WHERE v.status='normal' AND v.type='expense' AND v.date >= ? AND v.date <= ?
+		WHERE v.status='normal' AND (v.type='expense' OR (v.type='refund' AND v.refund_kind='destroy'))
+		  AND v.date >= ? AND v.date <= ?
 		ORDER BY v.date, v.no`, mStart, mEnd)
 	if err != nil {
 		return 2
@@ -259,12 +288,15 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 	defer rows.Close()
 	r := 3
 	for rows.Next() {
-		var date, no, community, building, cat, summary string
+		var date, no, community, building, cat, summary, refundKind string
 		var amount int64
-		rows.Scan(&date, &no, &community, &building, &cat, &amount, &summary)
-		label := expenseCatLabel[cat]
-		if label == "" {
-			label = expenseCatLabel["other"]
+		rows.Scan(&date, &no, &community, &building, &cat, &amount, &summary, &refundKind)
+		label := "灭失返还"
+		if refundKind != "destroy" {
+			label = expenseCatLabel[cat]
+			if label == "" {
+				label = expenseCatLabel["other"]
+			}
 		}
 		vals := []interface{}{date, no, community, building, label, centsToYuan(amount), summary, ""}
 		for i, v := range vals {
@@ -284,21 +316,22 @@ func writeVoucherRows(f *excelize.File, sheet, vtype, mStart, mEnd string) int {
 	return r
 }
 
-// writeBuildingSheet 分楼栋结余表：期初 / 本月缴存 / 本月支出分摊 / 期末（公式）
+// writeBuildingSheet 分楼栋结余表：期初 / 本月缴存 / 本月利息分配 / 本月返还退返 / 本月支出分摊 / 期末（公式）
 func writeBuildingSheet(f *excelize.File, sheet, mStart, mEnd string) {
 	bold, _ := f.NewStyle(&excelize.Style{Font: &excelize.Font{Bold: true}})
 	set := func(cell string, v interface{}) { f.SetCellValue(sheet, cell, v) }
 
-	for i, h := range []string{"小区", "楼栋", "户数", "期初结余", "本月缴存", "本月支出分摊", "期末结余"} {
+	for i, h := range []string{"小区", "楼栋", "户数", "期初结余", "本月缴存", "本月利息分配", "本月返还/退返", "本月支出分摊", "期末结余"} {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		set(cell, h)
 	}
-	f.SetCellStyle(sheet, "A1", "G1", bold)
+	f.SetCellStyle(sheet, "A1", "I1", bold)
 
 	type bRow struct {
-		community, building          string
-		hhCount                      int
-		opening, inc, alloc, closing int64
+		community, building             string
+		hhCount                         int
+		opening, inc, allocIn           int64
+		refund, alloc, closing          int64
 	}
 	rows, err := db.Query(`
 		SELECT c.name, b.name, b.id,
@@ -323,41 +356,48 @@ func writeBuildingSheet(f *excelize.File, sheet, mStart, mEnd string) {
 	deltaExpr := replaceAlias(householdDeltaExpr, "h")
 	r := 2
 	for i, br := range list {
-		// 楼栋当前户账余额（与四级账同源：期初建账+缴存-分摊）
+		// 楼栋当前户账余额（与四级账同源：期初建账+缴存+利息分配-分摊-返还）
 		var closing int64
 		db.QueryRow(`SELECT IFNULL(SUM(h.opening_balance + `+deltaExpr+`),0)
 			FROM households h WHERE h.building_id = ?`, ids[i]).Scan(&closing)
-		// 本月缴存 / 分摊（按户所在楼栋归集）
-		var inc, alloc int64
+		// 本月缴存 / 利息分配 / 返还 / 分摊（按户所在楼栋归集）
+		var inc, allocIn, refund, alloc int64
 		db.QueryRow(`SELECT IFNULL(SUM(v.amount),0) FROM vouchers v
 			JOIN households h ON v.household_id=h.id WHERE v.status='normal' AND v.type='income'
 			AND v.date>=? AND v.date<=? AND h.building_id = ?`, mStart, mEnd, ids[i]).Scan(&inc)
 		db.QueryRow(`SELECT IFNULL(SUM(v.amount),0) FROM vouchers v
+			JOIN households h ON v.household_id=h.id WHERE v.status='normal' AND v.type='interest_alloc_child'
+			AND v.date>=? AND v.date<=? AND h.building_id = ?`, mStart, mEnd, ids[i]).Scan(&allocIn)
+		db.QueryRow(`SELECT IFNULL(SUM(v.amount),0) FROM vouchers v
+			JOIN households h ON v.household_id=h.id WHERE v.status='normal' AND v.type='refund'
+			AND v.date>=? AND v.date<=? AND h.building_id = ?`, mStart, mEnd, ids[i]).Scan(&refund)
+		db.QueryRow(`SELECT IFNULL(SUM(v.amount),0) FROM vouchers v
 			JOIN households h ON v.household_id=h.id WHERE v.status='normal' AND v.type='allocate'
 			AND v.date>=? AND v.date<=? AND h.building_id = ?`, mStart, mEnd, ids[i]).Scan(&alloc)
-		br.inc, br.alloc = inc, alloc
+		br.inc, br.allocIn, br.refund, br.alloc = inc, allocIn, refund, alloc
 		br.closing = closing
-		br.opening = br.closing - br.inc + br.alloc
+		br.opening = br.closing - br.inc - br.allocIn + br.refund + br.alloc
 
-		vals := []interface{}{br.community, br.building, br.hhCount, centsToYuan(br.opening), centsToYuan(br.inc), centsToYuan(br.alloc)}
+		vals := []interface{}{br.community, br.building, br.hhCount, centsToYuan(br.opening),
+			centsToYuan(br.inc), centsToYuan(br.allocIn), centsToYuan(br.refund), centsToYuan(br.alloc)}
 		for i, v := range vals {
 			cell, _ := excelize.CoordinatesToCellName(i+1, r)
 			set(cell, v)
 		}
-		// 期末 = 期初 + 缴存 - 分摊（活公式）
-		cell, _ := excelize.CoordinatesToCellName(7, r)
-		f.SetCellFormula(sheet, cell, fmt.Sprintf("=D%d+E%d-F%d", r, r, r))
+		// 期末 = 期初 + 缴存 + 利息分配 - 返还退返 - 分摊（活公式）
+		cell, _ := excelize.CoordinatesToCellName(9, r)
+		f.SetCellFormula(sheet, cell, fmt.Sprintf("=D%d+E%d+F%d-G%d-H%d", r, r, r, r, r))
 		r++
 	}
 	// 合计行（活公式）
 	set(fmt.Sprintf("A%d", r), "合计")
 	f.SetCellStyle(sheet, fmt.Sprintf("A%d", r), fmt.Sprintf("A%d", r), bold)
 	f.SetCellFormula(sheet, fmt.Sprintf("C%d", r), fmt.Sprintf("=SUM(C2:C%d)", r-1))
-	for _, col := range []string{"D", "E", "F", "G"} {
+	for _, col := range []string{"D", "E", "F", "G", "H", "I"} {
 		f.SetCellFormula(sheet, fmt.Sprintf("%s%d", col, r), fmt.Sprintf("=SUM(%s2:%s%d)", col, col, r-1))
 	}
 	f.SetColWidth(sheet, "A", "B", 14)
-	f.SetColWidth(sheet, "C", "G", 14)
+	f.SetColWidth(sheet, "C", "I", 14)
 }
 
 // ==================== HTTP 处理器 ====================

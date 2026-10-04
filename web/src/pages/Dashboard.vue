@@ -22,6 +22,16 @@
         <div class="qc-title">录入利息</div>
         <div class="qc-desc">录入银行利息</div>
       </div>
+      <div class="quick-card alloc" @click="goDaily('interestAlloc')">
+        <div class="qc-icon">⇄</div>
+        <div class="qc-title">利息分配</div>
+        <div class="qc-desc">公共账利息按面积分配到各户</div>
+      </div>
+      <div class="quick-card refund" @click="goDaily('refund')">
+        <div class="qc-icon">−</div>
+        <div class="qc-title">返还/退返</div>
+        <div class="qc-desc">灭失返还、退返交存</div>
+      </div>
     </div>
 
     <!-- ==================== 统计 ==================== -->
@@ -51,6 +61,11 @@
             <template v-if="row.type === 'income'">{{ row.community }} {{ row.building }} {{ row.roomNo }} {{ row.owner }}</template>
             <template v-else-if="row.type === 'expense'">{{ row.community }}{{ row.building ? ' ' + row.building : '' }}（{{ row.summary || '维修项目' }}）</template>
             <template v-else-if="row.type === 'interest'">{{ row.community }} 公共账</template>
+            <template v-else-if="row.type === 'interest_alloc'">{{ row.community }} 公共账 → 各户</template>
+            <template v-else-if="row.type === 'refund'">{{ row.community }} {{ row.building }} {{ row.roomNo }} {{ row.owner }}（{{ row.refundKind === 'destroy' ? '灭失返还' : '退返' }}）</template>
+            <template v-else-if="row.type === 'fund_income'">{{ row.community }} 公共账（{{ { business: '经营收入', disposal: '处置收入', other: '其他收入' }[row.bizKind] || '其他收入' }}）</template>
+            <template v-else-if="row.type === 'cash'">{{ row.community }} 备用金（{{ row.bizKind === 'return' ? '退回银行' : '提取' }}）</template>
+            <template v-else-if="row.type === 'bond'">{{ row.community }} 国债（{{ row.bizKind === 'redeem' ? '到期兑付' : '购买' }}）</template>
             <template v-else>{{ row.community }} {{ row.building }} {{ row.roomNo }} {{ row.owner }}</template>
           </template>
         </el-table-column>
@@ -80,6 +95,9 @@
         <el-table-column prop="income" label="缴纳收入" align="right" :formatter="moneyFmt" />
         <el-table-column prop="expense" label="维修支出" align="right" :formatter="moneyFmt" />
         <el-table-column prop="interest" label="利息" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="interestAlloc" label="收益分配" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="fundIncome" label="其他收入" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="refund" label="返还/退返" align="right" :formatter="moneyFmt" />
         <el-table-column prop="allocate" label="分摊到户" align="right" :formatter="moneyFmt" />
         <el-table-column prop="count" label="凭证数" width="90" align="right" />
       </el-table>
@@ -95,6 +113,9 @@
         <el-table-column prop="income" label="缴纳收入" align="right" :formatter="moneyFmt" />
         <el-table-column prop="expense" label="维修支出" align="right" :formatter="moneyFmt" />
         <el-table-column prop="interest" label="利息" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="interestAlloc" label="收益分配" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="fundIncome" label="其他收入" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="refund" label="返还/退返" align="right" :formatter="moneyFmt" />
         <el-table-column prop="allocate" label="分摊到户" align="right" :formatter="moneyFmt" />
         <el-table-column prop="count" label="凭证数" width="90" align="right" />
       </el-table>
@@ -109,6 +130,9 @@
         <el-table-column prop="income" label="缴纳收入" align="right" :formatter="moneyFmt" />
         <el-table-column prop="expense" label="维修支出" align="right" :formatter="moneyFmt" />
         <el-table-column prop="interest" label="利息" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="interestAlloc" label="收益分配" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="fundIncome" label="其他收入" align="right" :formatter="moneyFmt" />
+        <el-table-column prop="refund" label="返还/退返" align="right" :formatter="moneyFmt" />
         <el-table-column prop="allocate" label="分摊到户" align="right" :formatter="moneyFmt" />
         <el-table-column prop="count" label="凭证数" width="90" align="right" />
       </el-table>
@@ -129,10 +153,14 @@ const daily = ref([])
 const yearly = ref([])
 const recent = ref([])
 
-const TYPE_LABEL = { income: '收款', expense: '维修支出', interest: '利息', allocate: '分摊到户' }
-const tagType = (t) => ({ income: 'danger', expense: 'success', interest: 'primary', allocate: 'warning' }[t] || 'info')
-const sign = (row) => (row.type === 'allocate' || row.type === 'expense' ? '−' : '+')
-const signColor = (row) => (row.type === 'allocate' || row.type === 'expense' ? '#3b6d11' : '#a32d2d')
+const TYPE_LABEL = {
+  income: '收款', expense: '维修支出', interest: '利息', allocate: '分摊到户',
+  refund: '返还/退返', interest_alloc: '收益分配', interest_alloc_child: '收益分配',
+  fund_income: '其他收入', cash: '备用金', bond: '国债投资',
+}
+const tagType = (t) => ({ income: 'danger', expense: 'success', interest: 'primary', allocate: 'warning', refund: 'danger', interest_alloc: 'primary', interest_alloc_child: 'primary', fund_income: 'primary', cash: 'info', bond: 'primary' }[t] || 'info')
+const sign = (row) => (row.type === 'allocate' || row.type === 'expense' || row.type === 'refund' || row.type === 'interest_alloc' ? '−' : '+')
+const signColor = (row) => (row.type === 'allocate' || row.type === 'expense' || row.type === 'refund' || row.type === 'interest_alloc' ? '#3b6d11' : '#a32d2d')
 
 const todayText = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })
 
@@ -156,15 +184,20 @@ function sumRows(rows, key) {
 function summaryTableHtml(rows, label) {
   return `
     <table>
-      <tr><th>${label}</th><th class="num">缴纳收入</th><th class="num">维修支出</th><th class="num">利息</th><th class="num">分摊到户</th><th class="num">凭证数</th></tr>
+      <tr><th>${label}</th><th class="num">缴纳收入</th><th class="num">维修支出</th><th class="num">利息</th><th class="num">收益分配</th><th class="num">其他收入</th><th class="num">返还/退返</th><th class="num">分摊到户</th><th class="num">凭证数</th></tr>
       ${rows.map((r) => `<tr><td>${r.group}</td>
         <td class="num">${fmtMoney(r.income)}</td><td class="num">${fmtMoney(r.expense)}</td>
-        <td class="num">${fmtMoney(r.interest)}</td><td class="num">${fmtMoney(r.allocate)}</td>
+        <td class="num">${fmtMoney(r.interest)}</td><td class="num">${fmtMoney(r.interestAlloc)}</td>
+        <td class="num">${fmtMoney(r.fundIncome)}</td>
+        <td class="num">${fmtMoney(r.refund)}</td><td class="num">${fmtMoney(r.allocate)}</td>
         <td class="num">${r.count}</td></tr>`).join('')}
       <tr><td><b>合计</b></td>
         <td class="num"><b>${fmtMoney(sumRows(rows, 'income'))}</b></td>
         <td class="num"><b>${fmtMoney(sumRows(rows, 'expense'))}</b></td>
         <td class="num"><b>${fmtMoney(sumRows(rows, 'interest'))}</b></td>
+        <td class="num"><b>${fmtMoney(sumRows(rows, 'interestAlloc'))}</b></td>
+        <td class="num"><b>${fmtMoney(sumRows(rows, 'fundIncome'))}</b></td>
+        <td class="num"><b>${fmtMoney(sumRows(rows, 'refund'))}</b></td>
         <td class="num"><b>${fmtMoney(sumRows(rows, 'allocate'))}</b></td>
         <td class="num"><b>${rows.reduce((t, r) => t + Number(r.count || 0), 0)}</b></td></tr>
     </table>`
@@ -191,12 +224,13 @@ function printYearly() {
   `)
 }
 
-const SUMMARY_HEADERS = ['期间', '缴纳收入', '维修支出', '利息', '分摊到户', '凭证数']
+const SUMMARY_HEADERS = ['期间', '缴纳收入', '维修支出', '利息', '收益分配', '其他收入', '返还/退返', '分摊到户', '凭证数']
 function summaryRows(rows) {
-  return rows.map((r) => [r.group, r.income, r.expense, r.interest, r.allocate, r.count])
+  return rows.map((r) => [r.group, r.income, r.expense, r.interest, r.interestAlloc, r.fundIncome, r.refund, r.allocate, r.count])
 }
 function summaryTotalRow(rows) {
-  return ['合计', sumRows(rows, 'income'), sumRows(rows, 'expense'), sumRows(rows, 'interest'), sumRows(rows, 'allocate'),
+  return ['合计', sumRows(rows, 'income'), sumRows(rows, 'expense'), sumRows(rows, 'interest'),
+    sumRows(rows, 'interestAlloc'), sumRows(rows, 'fundIncome'), sumRows(rows, 'refund'), sumRows(rows, 'allocate'),
     rows.reduce((t, r) => t + Number(r.count || 0), 0)]
 }
 function exportMonthly() {
@@ -219,10 +253,14 @@ function exportDaily() {
 .quick-card.income { border-left-color: #a32d2d; }
 .quick-card.expense { border-left-color: #3b6d11; }
 .quick-card.interest { border-left-color: #185fa5; }
+.quick-card.alloc { border-left-color: #7c3aed; }
+.quick-card.refund { border-left-color: #b45309; }
 .qc-icon { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 10px; }
 .quick-card.income .qc-icon { color: #a32d2d; }
 .quick-card.expense .qc-icon { color: #3b6d11; }
 .quick-card.interest .qc-icon { color: #185fa5; }
+.quick-card.alloc .qc-icon { color: #7c3aed; }
+.quick-card.refund .qc-icon { color: #b45309; }
 .qc-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
 .qc-desc { font-size: 13px; color: #6a7280; }
 .label { font-size: 12px; color: #6a7280; margin-bottom: 6px; }

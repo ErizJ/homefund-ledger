@@ -47,9 +47,9 @@ func TestTrialBalance(t *testing.T) {
 				}
 				defer tx.Rollback()
 				if _, err := glInsertTx(tx, "2026-09-15", "2026-09", "business", "manual", 0, "手工", []glEntry{
-					{"100101", cid, "debit", 100000},
-					{"3001", cid, "credit", 100000},
-				}); err != nil {
+					{subject: "100101", project: cid, dir: "debit", amount: 100000},
+					{subject: "3001", project: cid, dir: "credit", amount: 100000},
+				}, "test"); err != nil {
 					t.Fatalf("glInsertTx: %v", err)
 				}
 				tx.Commit()
@@ -82,15 +82,15 @@ func TestTrialBalance(t *testing.T) {
 				}
 				defer tx.Rollback()
 				if _, err := glInsertTx(tx, "2026-09-15", "2026-09", "business", "manual", 0, "九月", []glEntry{
-					{"100101", cid, "debit", 100000},
-					{"3001", cid, "credit", 100000},
-				}); err != nil {
+					{subject: "100101", project: cid, dir: "debit", amount: 100000},
+					{subject: "3001", project: cid, dir: "credit", amount: 100000},
+				}, "test"); err != nil {
 					t.Fatalf("glInsertTx(9月): %v", err)
 				}
 				if _, err := glInsertTx(tx, "2026-10-05", "2026-10", "business", "manual", 0, "十月", []glEntry{
-					{"100101", cid, "debit", 50000},
-					{"3001", cid, "credit", 50000},
-				}); err != nil {
+					{subject: "100101", project: cid, dir: "debit", amount: 50000},
+					{subject: "3001", project: cid, dir: "credit", amount: 50000},
+				}, "test"); err != nil {
 					t.Fatalf("glInsertTx(10月): %v", err)
 				}
 				tx.Commit()
@@ -106,9 +106,9 @@ func TestTrialBalance(t *testing.T) {
 				}
 				defer tx.Rollback()
 				if _, err := glInsertTx(tx, "2026-09-15", "2026-09", "business", "manual", 0, "有效", []glEntry{
-					{"100101", cid, "debit", 100000},
-					{"3001", cid, "credit", 100000},
-				}); err != nil {
+					{subject: "100101", project: cid, dir: "debit", amount: 100000},
+					{subject: "3001", project: cid, dir: "credit", amount: 100000},
+				}, "test"); err != nil {
 					t.Fatalf("glInsertTx: %v", err)
 				}
 				tx.Commit()
@@ -193,7 +193,7 @@ func TestReconcile(t *testing.T) {
 				seedAllocate(t, tx, "2026-09-10", cid, bid, h1, 2500000, masterID)
 				seedAllocate(t, tx, "2026-09-10", cid, bid, h2, 2500000, masterID)
 				seedBizVoucher(t, tx, "2026-09-20", "interest", cid, 0, 50000, "", "利息")
-				if err := closeMonthTx(tx, "2026-09"); err != nil {
+				if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 					t.Fatalf("closeMonthTx: %v", err)
 				}
 				tx.Commit()
@@ -220,10 +220,12 @@ func TestReconcile(t *testing.T) {
 				seedAllocate(t, tx, "2026-09-10", cid, bid, h1, 2500000, masterID)
 				seedAllocate(t, tx, "2026-09-10", cid, bid, h2, 2500000, masterID)
 				seedBizVoucher(t, tx, "2026-09-20", "interest", cid, 0, 50000, "", "利息")
-				// 作废业务凭证并级联作废财务凭证（与 voidVoucher 口径一致）
+				// 作废业务凭证并重建当日汇总凭证（与 voidVoucher 口径一致）
 				tx.Exec(`UPDATE vouchers SET status='voided' WHERE id=?`, voidedID)
-				tx.Exec(`UPDATE gl_vouchers SET status='voided' WHERE source_type='voucher' AND source_id=?`, voidedID)
-				if err := closeMonthTx(tx, "2026-09"); err != nil {
+				if err := rebuildCommunityDayGL(tx, cid, "2026-09-05", "test", false); err != nil {
+					t.Fatalf("rebuildCommunityDayGL: %v", err)
+				}
+				if err := closeMonthTx(tx, "2026-09", "test"); err != nil {
 					t.Fatalf("closeMonthTx: %v", err)
 				}
 				tx.Commit()

@@ -27,7 +27,10 @@ var uploadsDir string
 const schema = `
 CREATE TABLE IF NOT EXISTS communities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE
+  name TEXT NOT NULL UNIQUE,
+  fund_type TEXT NOT NULL DEFAULT 'commercial',
+  public_opening INTEGER NOT NULL DEFAULT 0,
+  first_rate REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS buildings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,7 +51,7 @@ CREATE TABLE IF NOT EXISTS vouchers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   no TEXT NOT NULL UNIQUE,
   date TEXT NOT NULL,
-  type TEXT NOT NULL CHECK(type IN ('income','expense','interest','allocate')),
+  type TEXT NOT NULL CHECK(type IN ('income','expense','interest','allocate','refund','interest_alloc','interest_alloc_child','fund_income','cash','bond')),
   community_id INTEGER NOT NULL REFERENCES communities(id),
   building_id INTEGER,
   household_id INTEGER,
@@ -57,7 +60,13 @@ CREATE TABLE IF NOT EXISTS vouchers (
   master_id INTEGER,
   status TEXT NOT NULL DEFAULT 'normal' CHECK(status IN ('normal','voided')),
   void_of INTEGER,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  voided_by TEXT NOT NULL DEFAULT '',
+  void_reason TEXT NOT NULL DEFAULT '',
+  expense_category TEXT NOT NULL DEFAULT '',
+  refund_kind TEXT NOT NULL DEFAULT '',
+  biz_kind TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_v_household ON vouchers(household_id);
 CREATE INDEX IF NOT EXISTS idx_v_community ON vouchers(community_id);
@@ -65,6 +74,10 @@ CREATE INDEX IF NOT EXISTS idx_v_date ON vouchers(date);
 
 CREATE TABLE IF NOT EXISTS periods (
   month TEXT PRIMARY KEY,
+  closed_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fiscal_years (
+  year TEXT PRIMARY KEY,
   closed_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS attachments (
@@ -105,7 +118,13 @@ CREATE TABLE IF NOT EXISTS gl_vouchers (
   summary TEXT DEFAULT '',
   month TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'normal' CHECK(status IN ('normal','voided')),
-  created_at TEXT NOT NULL
+  appendix INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_gv_month ON gl_vouchers(month);
 CREATE INDEX IF NOT EXISTS idx_gv_source ON gl_vouchers(source_type, source_id);
@@ -115,7 +134,8 @@ CREATE TABLE IF NOT EXISTS gl_entries (
   subject_code TEXT NOT NULL REFERENCES gl_subjects(code),
   project_id INTEGER,
   direction TEXT NOT NULL CHECK(direction IN ('debit','credit')),
-  amount INTEGER NOT NULL
+  amount INTEGER NOT NULL,
+  summary TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_ge_voucher ON gl_entries(voucher_id);
 CREATE INDEX IF NOT EXISTS idx_ge_subject ON gl_entries(subject_code);
@@ -126,12 +146,66 @@ CREATE INDEX IF NOT EXISTS idx_ge_project ON gl_entries(project_id);
 func migrate() error {
 	stmts := []string{
 		`ALTER TABLE communities ADD COLUMN fund_type TEXT NOT NULL DEFAULT 'commercial'`,
+		`ALTER TABLE communities ADD COLUMN public_opening INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE communities ADD COLUMN first_rate REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE vouchers ADD COLUMN expense_category TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vouchers ADD COLUMN refund_kind TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vouchers ADD COLUMN biz_kind TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vouchers ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vouchers ADD COLUMN voided_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE vouchers ADD COLUMN void_reason TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE gl_entries ADD COLUMN summary TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE gl_vouchers ADD COLUMN appendix INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE gl_vouchers ADD COLUMN created_by TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range stmts {
 		db.Exec(s)
 	}
-	return migrateAmountsToCents()
+	if err := migrateAmountsToCents(); err != nil {
+		return err
+	}
+	if err := migrateVoucherTypes(); err != nil {
+		return err
+	}
+	if err := migrateSubjectCodes(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateSubjectCodes 老库科目编码对齐财会〔2020〕7号附录：4103 共用设施处置收入→4301、5201 其他支出→5901。
+// 同步改写 gl_entries 中的引用（需临时关闭外键检查），幂等。
+func migrateSubjectCodes() error {
+	renames := [][2]string{
+		{"4103", "4301"}, {"410301", "430101"}, {"410302", "430102"},
+		{"5201", "5901"}, {"520101", "590101"}, {"520102", "590102"},
+	}
+	db.SetMaxOpenConns(1)
+	defer db.SetMaxOpenConns(0)
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer db.Exec(`PRAGMA foreign_keys=ON`)
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, r := range renames {
+		if _, err := tx.Exec(`UPDATE gl_entries SET subject_code=? WHERE subject_code=?`, r[1], r[0]); err != nil {
+			return fmt.Errorf("迁移分录科目 %s→%s 失败: %w", r[0], r[1], err)
+		}
+		if _, err := tx.Exec(`UPDATE gl_subjects SET code=? WHERE code=?`, r[1], r[0]); err != nil {
+			return fmt.Errorf("迁移科目 %s→%s 失败: %w", r[0], r[1], err)
+		}
+	}
+	if _, err := tx.Exec(`UPDATE gl_subjects SET parent='4301' WHERE code IN ('430101','430102')`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE gl_subjects SET parent='5901' WHERE code IN ('590101','590102')`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // 金额列迁移需要重建的表：旧结构金额列为 REAL（元），新结构为 INTEGER（分）
@@ -149,7 +223,7 @@ var amountTables = []amountTableRebuild{
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   no TEXT NOT NULL UNIQUE,
   date TEXT NOT NULL,
-  type TEXT NOT NULL CHECK(type IN ('income','expense','interest','allocate')),
+  type TEXT NOT NULL CHECK(type IN ('income','expense','interest','allocate','refund','interest_alloc','interest_alloc_child','fund_income','cash','bond')),
   community_id INTEGER NOT NULL REFERENCES communities(id),
   building_id INTEGER,
   household_id INTEGER,
@@ -159,10 +233,15 @@ var amountTables = []amountTableRebuild{
   status TEXT NOT NULL DEFAULT 'normal' CHECK(status IN ('normal','voided')),
   void_of INTEGER,
   created_at TEXT NOT NULL,
-  expense_category TEXT NOT NULL DEFAULT ''
+  created_by TEXT NOT NULL DEFAULT '',
+  voided_by TEXT NOT NULL DEFAULT '',
+  void_reason TEXT NOT NULL DEFAULT '',
+  expense_category TEXT NOT NULL DEFAULT '',
+  refund_kind TEXT NOT NULL DEFAULT '',
+  biz_kind TEXT NOT NULL DEFAULT ''
 )`,
-		copy: `INSERT INTO vouchers_new (id,no,date,type,community_id,building_id,household_id,amount,summary,master_id,status,void_of,created_at,expense_category)
-			SELECT id,no,date,type,community_id,building_id,household_id,CAST(ROUND(amount*100) AS INTEGER),summary,master_id,status,void_of,created_at,expense_category FROM vouchers`,
+		copy: `INSERT INTO vouchers_new (id,no,date,type,community_id,building_id,household_id,amount,summary,master_id,status,void_of,created_at,created_by,voided_by,void_reason,expense_category,refund_kind,biz_kind)
+			SELECT id,no,date,type,community_id,building_id,household_id,CAST(ROUND(amount*100) AS INTEGER),summary,master_id,status,void_of,created_at,created_by,voided_by,void_reason,expense_category,refund_kind,biz_kind FROM vouchers`,
 		indexes: []string{
 			`CREATE INDEX idx_v_household ON vouchers(household_id)`,
 			`CREATE INDEX idx_v_community ON vouchers(community_id)`,
@@ -206,7 +285,8 @@ var amountTables = []amountTableRebuild{
   subject_code TEXT NOT NULL REFERENCES gl_subjects(code),
   project_id INTEGER,
   direction TEXT NOT NULL CHECK(direction IN ('debit','credit')),
-  amount INTEGER NOT NULL
+  amount INTEGER NOT NULL,
+  summary TEXT NOT NULL DEFAULT ''
 )`,
 		copy: `INSERT INTO gl_entries_new (id,voucher_id,subject_code,project_id,direction,amount)
 			SELECT id,voucher_id,subject_code,project_id,direction,CAST(ROUND(amount*100) AS INTEGER) FROM gl_entries`,
@@ -294,6 +374,53 @@ func migrateAmountsToCents() error {
 	return nil
 }
 
+// migrateVoucherTypes 老库 vouchers 表 CHECK 约束不含新凭证类型时重建表。
+// 以最新类型标记 fund_income 判断；金额列已是 INTEGER（分），直接拷贝不换算；重建需关闭外键检查。
+func migrateVoucherTypes() error {
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name='vouchers'`).Scan(&ddl); err != nil {
+		return nil // 表不存在（全新库首次建表即含新约束），无需迁移
+	}
+	if strings.Contains(ddl, "fund_income") {
+		return nil
+	}
+	db.SetMaxOpenConns(1)
+	defer db.SetMaxOpenConns(0)
+	if _, err := db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+		return err
+	}
+	defer db.Exec(`PRAGMA foreign_keys=ON`)
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(amountTables[0].ddl); err != nil {
+		return fmt.Errorf("创建 vouchers_new 失败: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO vouchers_new (id,no,date,type,community_id,building_id,household_id,amount,summary,master_id,status,void_of,created_at,created_by,voided_by,void_reason,expense_category,refund_kind,biz_kind)
+		SELECT id,no,date,type,community_id,building_id,household_id,amount,summary,master_id,status,void_of,created_at,created_by,voided_by,void_reason,expense_category,refund_kind,biz_kind FROM vouchers`); err != nil {
+		return fmt.Errorf("拷贝 vouchers 失败: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE vouchers`); err != nil {
+		return fmt.Errorf("删除旧 vouchers 失败: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE vouchers_new RENAME TO vouchers`); err != nil {
+		return fmt.Errorf("重命名 vouchers_new 失败: %w", err)
+	}
+	for _, idx := range amountTables[0].indexes {
+		if _, err := tx.Exec(idx); err != nil {
+			return fmt.Errorf("重建索引失败: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	log.Printf("vouchers 表已重建：凭证类型扩展（fund_income/cash/bond）")
+	return nil
+}
+
 func openDB(path string) error {
 	var err error
 	db, err = sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
@@ -312,7 +439,14 @@ func openDB(path string) error {
 		return fmt.Errorf("数据库迁移失败: %w", err)
 	}
 	seedGLSubjects()
+	seedSettings()
 	return nil
+}
+
+// seedSettings 预置系统设置（编制单位等）
+func seedSettings() {
+	db.Exec(`INSERT OR IGNORE INTO settings(key, value) VALUES('org_name', '演示代管单位')`)
+	db.Exec(`INSERT OR IGNORE INTO settings(key, value) VALUES('auto_gl', '1')`)
 }
 
 func main() {
@@ -335,10 +469,19 @@ func main() {
 	r := gin.Default()
 	r.Use(corsMiddleware())
 
+	// 登录/注销无需认证；其余 /api（含会话查询）全部需要登录
+	r.POST("/api/login", authLogin)
+	r.POST("/api/logout", authLogout)
+
 	api := r.Group("/api")
+	api.Use(authMiddleware())
 	{
+		api.GET("/session", authSession)
+		api.GET("/settings", getSettings)
+		api.PUT("/settings", updateSettings)
 		api.GET("/communities", listCommunities)
 		api.POST("/communities", createCommunity)
+		api.PUT("/communities/:id", updateCommunity)
 		api.GET("/buildings", listBuildings)
 		api.POST("/buildings", createBuilding)
 
@@ -352,6 +495,8 @@ func main() {
 		api.GET("/vouchers", listVouchers)
 		api.GET("/vouchers/:id", voucherDetail)
 		api.POST("/vouchers", createVoucher)
+		api.POST("/vouchers/import", importVouchers)
+		api.POST("/vouchers/expense-preview", previewExpense)
 		api.POST("/vouchers/:id/void", voidVoucher)
 
 		api.POST("/vouchers/:id/attachments", uploadAttachment)
@@ -361,6 +506,9 @@ func main() {
 		api.GET("/periods", listPeriods)
 		api.POST("/periods/close", closePeriod)
 		api.POST("/periods/reopen", reopenPeriod)
+		api.GET("/periods/years", listFiscalYears)
+		api.POST("/periods/close-year", closeFiscalYear)
+		api.POST("/periods/reopen-year", reopenFiscalYear)
 
 		api.POST("/bank/import", bankImport)
 		api.GET("/bank/txns", bankList)
@@ -384,10 +532,19 @@ func main() {
 		api.GET("/summary/yearly", summaryYearly)
 
 		api.GET("/gl/subjects", glListSubjects)
+		api.POST("/gl/subjects", glSubjectCreate)
+		api.PUT("/gl/subjects/:code", glSubjectUpdate)
+		api.DELETE("/gl/subjects/:code", glSubjectDelete)
 		api.GET("/gl/balances", glBalances)
 		api.GET("/gl/entries", glEntries)
 		api.GET("/gl/trial-balance", glTrialBalance)
 		api.GET("/gl/general-ledger", glGeneralLedger)
+		api.GET("/gl/balance-sheet", glBalanceSheet)
+		api.GET("/gl/income-statement", glIncomeStatement)
+		api.GET("/gl/net-asset-statement", glNetAssetStatement)
+		api.GET("/gl/balance-sheet/pdf", glBalanceSheetPDF)
+		api.GET("/gl/income-statement/pdf", glIncomeStatementPDF)
+		api.GET("/gl/net-asset-statement/pdf", glNetAssetStatementPDF)
 		api.GET("/gl/reconcile", glReconcile)
 		api.POST("/gl/opening-balance", glOpeningBalance)
 		api.GET("/gl/vouchers", glVoucherList)
@@ -396,11 +553,16 @@ func main() {
 		api.POST("/gl/vouchers/:id/void", glVoidManual)
 		api.POST("/gl/backfill", glBackfill)
 		api.POST("/gl/transfer", glTransferMonth)
+		api.GET("/gl/voucher-summary", glVoucherSummary)
 	}
 
-	log.Println("服务已启动: http://127.0.0.1:8080")
+	port := os.Getenv("VFUND_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Println("服务已启动: http://127.0.0.1:" + port)
 	os.MkdirAll("uploads", 0o755)
-	if err := r.Run("127.0.0.1:8080"); err != nil {
+	if err := r.Run("127.0.0.1:" + port); err != nil {
 		log.Fatalf("启动失败: %v", err)
 	}
 }

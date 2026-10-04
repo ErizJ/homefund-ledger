@@ -105,7 +105,7 @@ func bankCandidates(c *gin.Context) {
 	JOIN communities c ON v.community_id=c.id
 	LEFT JOIN buildings b ON v.building_id=b.id
 	LEFT JOIN households h ON v.household_id=h.id
-	WHERE v.status='normal' AND v.type IN ('income','expense','interest')
+	WHERE v.status='normal' AND v.type IN ('income','expense','interest','refund','fund_income','cash','bond')
 	  AND v.id NOT IN (SELECT matched_voucher_id FROM bank_txns WHERE matched_voucher_id IS NOT NULL)
 	  AND v.amount = ?
 	ORDER BY ABS(julianday(v.date) - julianday(?))
@@ -191,7 +191,7 @@ func bankIgnore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// GET /api/reports/households?communityId=  分户余额表（含楼洞名）
+// GET /api/reports/households?communityId=  分户余额表（含楼洞名与续筹红线提示）
 func reportHouseholds(c *gin.Context) {
 	cid, err := strconv.ParseInt(c.Query("communityId"), 10, 64)
 	if err != nil {
@@ -199,8 +199,9 @@ func reportHouseholds(c *gin.Context) {
 		return
 	}
 	rows, err := db.Query(`SELECT b.name, h.room_no, h.owner, h.area, h.opening_balance,
-		h.opening_balance + `+replaceAlias(householdDeltaExpr, "h")+`
-	FROM households h JOIN buildings b ON h.building_id=b.id
+		h.opening_balance + `+replaceAlias(householdDeltaExpr, "h")+`,
+		`+firstPaymentExpr+`
+	FROM households h JOIN buildings b ON h.building_id=b.id JOIN communities c ON b.community_id=c.id
 	WHERE b.community_id=? ORDER BY b.name, h.room_no`, cid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -212,11 +213,12 @@ func reportHouseholds(c *gin.Context) {
 		var building, room string
 		var owner sql.NullString
 		var area float64
-		var opening, balance int64
-		rows.Scan(&building, &room, &owner, &area, &opening, &balance)
+		var opening, balance, firstPayment int64
+		rows.Scan(&building, &room, &owner, &area, &opening, &balance, &firstPayment)
 		out = append(out, gin.H{
 			"building": building, "roomNo": room, "owner": owner.String,
 			"area": area, "openingBalance": centsToYuan(opening), "balance": centsToYuan(balance),
+			"firstPayment": centsToYuan(firstPayment), "belowThreshold": belowThreshold(balance, firstPayment),
 		})
 	}
 	c.JSON(http.StatusOK, out)

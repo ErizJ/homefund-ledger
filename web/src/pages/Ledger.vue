@@ -45,7 +45,13 @@
         <el-table-column prop="area" label="建筑面积㎡" align="right" :formatter="numFmt" />
         <el-table-column prop="openingBalance" label="期初余额" align="right" :formatter="moneyFmt" />
         <el-table-column label="当前余额" align="right">
-          <template #default="{ row }"><b>{{ fmt(row.balance) }}</b></template>
+          <template #default="{ row }">
+            <b>{{ fmt(row.balance) }}</b>
+            <el-tooltip v-if="row.belowThreshold" placement="top"
+              :content="`余额低于首期交存额（¥ ${fmt(row.firstPayment)}）的 30%，按规定应续筹`">
+              <el-tag type="danger" size="small" style="margin-left: 6px">低于30%</el-tag>
+            </el-tooltip>
+          </template>
         </el-table-column>
       </el-table>
     </div>
@@ -84,16 +90,21 @@ async function printHouseholds() {
   const rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
   const buildings = [...new Set(rows.map((r) => r.building))]
   let total = 0
+  let warnCount = 0
   const sections = buildings.map((b) => {
     const list = rows.filter((r) => r.building === b)
     const sub = list.reduce((s, r) => s + Number(r.balance), 0)
     total += sub
     return `<h3 style="font-size:13px;margin:14px 0 6px">${b}（小计：¥ ${fmtMoney(sub)}）</h3>
       <table>
-        <tr><th>户号</th><th>户主</th><th class="num">建筑面积㎡</th><th class="num">期初余额</th><th class="num">当前余额</th></tr>
-        ${list.map((r) => `<tr><td>${r.roomNo}</td><td>${r.owner || ''}</td>
+        <tr><th>户号</th><th>户主</th><th class="num">建筑面积㎡</th><th class="num">期初余额</th><th class="num">当前余额</th><th>续筹提示</th></tr>
+        ${list.map((r) => {
+          if (r.belowThreshold) warnCount++
+          return `<tr><td>${r.roomNo}</td><td>${r.owner || ''}</td>
           <td class="num">${fmtMoney(r.area)}</td><td class="num">${fmtMoney(r.openingBalance)}</td>
-          <td class="num">${fmtMoney(r.balance)}</td></tr>`).join('')}
+          <td class="num">${fmtMoney(r.balance)}</td>
+          <td>${r.belowThreshold ? '<b style="color:#a32d2d">低于首期30%</b>' : ''}</td></tr>`
+        }).join('')}
       </table>`
   }).join('')
   printHTML(`分户余额表 ${currentCommunity.value.name}`, `
@@ -101,17 +112,19 @@ async function printHouseholds() {
     <div class="meta">小区：${currentCommunity.value.name}　打印时间：${new Date().toLocaleString('zh-CN')}</div>
     ${sections}
     <h3 style="font-size:13px;margin:14px 0 6px">合计（含公共账）：¥ ${fmtMoney(currentCommunity.value.balance)}　其中户账合计：¥ ${fmtMoney(total)}　公共账（利息等）：¥ ${fmtMoney(currentCommunity.value.publicBalance)}</h3>
+    <p style="font-size:12px;color:#a32d2d">低于首期交存额30%红线的住户共 ${warnCount} 户（按165号令应及时续筹）。</p>
     <div class="sign"><span>制表人</span><span>复核人</span><span>负责人</span><span>日期</span></div>
   `)
 }
 
 async function exportHouseholds() {
   const rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
-  const table = rows.map((r) => [r.building, r.roomNo, r.owner || '', r.area, r.openingBalance, r.balance])
+  const table = rows.map((r) => [r.building, r.roomNo, r.owner || '', r.area, r.openingBalance, r.balance,
+    r.belowThreshold ? '低于首期30%' : ''])
   const total = rows.reduce((s, r) => s + Number(r.balance), 0)
-  table.push(['合计', '', '', '', '', total])
+  table.push(['合计', '', '', '', '', total, ''])
   exportExcel(`分户余额表 ${currentCommunity.value.name}.xlsx`, '分户余额表',
-    ['楼洞', '户号', '户主', '建筑面积㎡', '期初余额', '当前余额'], table)
+    ['楼洞', '户号', '户主', '建筑面积㎡', '期初余额', '当前余额', '续筹提示'], table)
 }
 
 async function fetchStatement() {
@@ -129,20 +142,23 @@ function statementTableHtml(d) {
       <tr><td><b>期初余额</b>（${d.year} 年 1 月 1 日）</td><td class="num">¥ ${fmtMoney(d.opening)}</td></tr>
       <tr><td><b>本期缴纳收入</b></td><td class="num">+ ¥ ${fmtMoney(d.income)}</td></tr>
       <tr><td><b>本期利息收入（公共账）</b></td><td class="num">+ ¥ ${fmtMoney(d.interest)}</td></tr>
+      <tr><td><b>本期其他收入（经营/处置等）</b></td><td class="num">+ ¥ ${fmtMoney(d.fundIncome)}</td></tr>
       <tr><td><b>本期维修工程支出</b>（分摊到户总额与之一致）</td><td class="num">¥ ${fmtMoney(d.expense)}</td></tr>
+      <tr><td><b>本期返还 / 退返</b></td><td class="num">− ¥ ${fmtMoney(d.refund)}</td></tr>
       <tr><td><b>本期分摊到户</b></td><td class="num">− ¥ ${fmtMoney(d.allocate)}</td></tr>
       <tr><td><b>期末余额</b></td><td class="num" style="font-size:14px"><b>¥ ${fmtMoney(d.closing)}</b></td></tr>
     </table>
     ${d.months.length ? `
     <h3 style="font-size:13px;margin:14px 0 6px">分月发生额</h3>
     <table>
-      <tr><th>月份</th><th class="num">缴纳收入</th><th class="num">维修支出</th><th class="num">利息</th><th class="num">分摊到户</th><th class="num">凭证数</th></tr>
+      <tr><th>月份</th><th class="num">缴纳收入</th><th class="num">维修支出</th><th class="num">利息</th><th class="num">利息分配</th><th class="num">返还/退返</th><th class="num">分摊到户</th><th class="num">凭证数</th></tr>
       ${d.months.map((m) => `<tr><td>${m.month}</td>
         <td class="num">${fmtMoney(m.income)}</td><td class="num">${fmtMoney(m.expense)}</td>
-        <td class="num">${fmtMoney(m.interest)}</td><td class="num">${fmtMoney(m.allocate)}</td>
+        <td class="num">${fmtMoney(m.interest)}</td><td class="num">${fmtMoney(m.interestAlloc)}</td>
+        <td class="num">${fmtMoney(m.refund)}</td><td class="num">${fmtMoney(m.allocate)}</td>
         <td class="num">${m.count}</td></tr>`).join('')}
     </table>` : ''}
-    <p style="font-size:12px;color:#555">说明：期末余额 = 期初余额 + 缴纳收入 + 利息 − 分摊到户；维修工程支出通过分摊由各户维修基金承担。</p>`
+    <p style="font-size:12px;color:#555">说明：期末余额 = 期初余额 + 缴纳收入 + 利息 + 其他收入 − 维修支出 − 返还/退返；维修工程支出通过分摊由各户维修基金承担，收益分配为公共账转入各户分户账的内部结转。</p>`
 }
 
 async function printStatement() {
@@ -163,13 +179,15 @@ async function exportStatement() {
     ['期初余额', d.opening],
     ['本期缴纳收入', d.income],
     ['本期利息收入（公共账）', d.interest],
+    ['本期其他收入（经营/处置等）', d.fundIncome],
     ['本期维修工程支出', d.expense],
+    ['本期返还/退返', d.refund],
     ['本期分摊到户', d.allocate],
     ['期末余额', d.closing],
     [],
     ['分月发生额'],
-    ['月份', '缴纳收入', '维修支出', '利息', '分摊到户', '凭证数'],
-    ...d.months.map((m) => [m.month, m.income, m.expense, m.interest, m.allocate, m.count]),
+    ['月份', '缴纳收入', '维修支出', '利息', '利息分配', '返还/退返', '分摊到户', '凭证数'],
+    ...d.months.map((m) => [m.month, m.income, m.expense, m.interest, m.interestAlloc, m.refund, m.allocate, m.count]),
   ]
   exportExcel(`小区对账单 ${d.community} ${d.year}.xlsx`, '小区对账单', ['项目', '金额/内容'], rows)
 }

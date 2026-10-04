@@ -87,7 +87,8 @@ func seedBizVoucher(t *testing.T, tx *sql.Tx, date, vtype string, communityID, h
 	}
 	id, _ := res.LastInsertId()
 	if vtype == "income" || vtype == "interest" || vtype == "expense" {
-		if err := generateBusinessGL(tx, vtype, date, communityID, amountCents, category, summary, id); err != nil {
+		if err := generateBusinessGL(tx, bizGLReq{Type: vtype, Date: date, CommunityID: communityID,
+			Amount: amountCents, Category: category, Summary: summary, BizID: id, CreatedBy: "test"}); err != nil {
 			t.Fatalf("generateBusinessGL(%s): %v", vtype, err)
 		}
 	}
@@ -109,9 +110,9 @@ func seedOpeningGL(t *testing.T, tx *sql.Tx, date string, communityID int64, fun
 	t.Helper()
 	if _, err := glInsertTx(tx, date, date[:7], "opening", "opening", communityID,
 		"期初建账", []glEntry{
-			{glSlot(fundType, "bank"), communityID, "debit", amountCents},
-			{glSlot(fundType, "netasset"), communityID, "credit", amountCents},
-		}); err != nil {
+			{subject: glSlot(fundType, "bank"), project: communityID, dir: "debit", amount: amountCents},
+			{subject: glSlot(fundType, "netasset"), project: communityID, dir: "credit", amount: amountCents},
+		}, "test"); err != nil {
 		t.Fatalf("seedOpeningGL: %v", err)
 	}
 }

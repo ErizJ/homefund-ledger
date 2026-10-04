@@ -23,9 +23,9 @@ func uploadAttachment(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "凭证不存在"})
 		return
 	}
-	// 月结锁账校验：锁账月份的凭证禁止上传附件
-	if closed, err := isMonthClosed(vdate[:7]); err == nil && closed {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "该凭证所在月份已月结锁账，请先反结转再上传附件"})
+	// 月结/年结锁账校验：锁账月份的凭证禁止上传附件
+	if msg := lockError(vdate[:7]); msg != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg + "，请先解锁再上传附件"})
 		return
 	}
 	fh, err := c.FormFile("file")
@@ -79,10 +79,17 @@ func deleteAttachment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效 id"})
 		return
 	}
-	var stored string
-	if err := db.QueryRow(`SELECT stored_name FROM attachments WHERE id=?`, id).Scan(&stored); err != nil {
+	var stored, vdate string
+	if err := db.QueryRow(`SELECT a.stored_name, v.date FROM attachments a
+		LEFT JOIN vouchers v ON a.voucher_id=v.id WHERE a.id=?`, id).Scan(&stored, &vdate); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "附件不存在"})
 		return
+	}
+	if len(vdate) >= 7 {
+		if msg := lockError(vdate[:7]); msg != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": msg + "，请先解锁再删除附件"})
+			return
+		}
 	}
 	os.Remove(filepath.Join(uploadsDir, stored))
 	if _, err := db.Exec(`DELETE FROM attachments WHERE id=?`, id); err != nil {
