@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -1226,70 +1227,46 @@ func glTransferMonth(c *gin.Context) {
 	var req struct {
 		Month string `json:"month" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil || len(req.Month) < 7 {
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Month) != 7 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供月份，如 2026-10"})
 		return
 	}
-	var closedCnt int
-	db.QueryRow(`SELECT COUNT(*) FROM periods WHERE month=?`, req.Month).Scan(&closedCnt)
-	if closedCnt > 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "该月份已随月结锁账自动结转，无需手工结转"})
-		return
-	}
-	if msg := lockError(req.Month); msg != "" {
-		c.JSON(http.StatusConflict, gin.H{"error": msg})
-		return
-	}
-
+	// 月末结转 = 完整月结流程（与 /periods/close 同一核心）：
+	// 生成结转凭证 + 写入 periods（已结转月份列表、反结转都依赖它）+ 生成月报表与财务报表快照。
+	// 幂等：重复执行会按最新账目重算（closeMonthTx 先删旧结转再生成）。
 	tx, err := db.Begin()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	defer tx.Rollback()
-
-	// 该月 4/5 类科目的借贷发生额（含此前手工结转产生的冲销分录，天然幂等），按净额结转
-	nets := []plNet{}
-	rows, err := tx.Query(`
-		SELECT e.subject_code, e.project_id,
-			IFNULL(SUM(CASE WHEN e.direction='debit'  THEN e.amount ELSE 0 END),0),
-			IFNULL(SUM(CASE WHEN e.direction='credit' THEN e.amount ELSE 0 END),0),
-			IFNULL((SELECT fund_type FROM communities cm WHERE cm.id=e.project_id),'commercial')
-		FROM gl_entries e
-		JOIN gl_vouchers v ON e.voucher_id=v.id AND v.status='normal' AND substr(v.date,1,7)=?
-		JOIN gl_subjects s ON e.subject_code=s.code
-		WHERE substr(e.subject_code,1,1) IN ('4','5')
-		GROUP BY e.subject_code, e.project_id`, req.Month)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if err := closeMonthTx(tx, req.Month, c.GetString("authUser")); err != nil {
+		if errors.Is(err, errNothingToClose) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
 		return
 	}
-	for rows.Next() {
-		var n plNet
-		rows.Scan(&n.subject, &n.project, &n.debit, &n.credit, &n.fundType)
-		nets = append(nets, n)
-	}
-	rows.Close()
-
-	entries := closingEntriesFromAggs(nets)
-	if len(entries) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "该月份没有需要结转的收入/支出（可能已全部结转）"})
-		return
-	}
-	lastDate := req.Month + "-01"
-	if t, e := time.Parse("2006-01", req.Month); e == nil {
-		lastDate = t.AddDate(0, 1, -1).Format("2006-01-02")
-	}
-	no, err := glInsertTx(tx, lastDate, req.Month, "closing", "period", 0, "月末结转（手工）"+req.Month, entries, c.GetString("authUser"))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成结转凭证失败：" + err.Error()})
-		return
-	}
+	var no string
+	tx.QueryRow(`SELECT no FROM gl_vouchers WHERE kind='closing' AND month=? AND status='normal' ORDER BY id DESC LIMIT 1`,
+		req.Month).Scan(&no)
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true, "month": req.Month, "no": no})
+	resp := gin.H{"ok": true, "month": req.Month, "no": no}
+	if name, err := generateMonthlyReport(req.Month); err != nil {
+		resp["reportError"] = "月报表生成失败：" + err.Error()
+	} else {
+		resp["report"] = name
+	}
+	if name, err := generateStatementsSnapshot(req.Month); err != nil {
+		resp["statementReportError"] = "财务报表快照生成失败：" + err.Error()
+	} else {
+		resp["statementReport"] = name
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // ==================== 科目汇总表（记账凭证汇总） ====================

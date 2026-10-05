@@ -993,17 +993,8 @@ func createVoucher(c *gin.Context) {
 		}
 		var masterID int64
 		tx.QueryRow(`SELECT last_insert_rowid()`).Scan(&masterID)
-		// 财务分录：借 待分配累计收益 / 贷 维修资金（净资产），收益分配入户
-		var fundType string
-		tx.QueryRow(`SELECT fund_type FROM communities WHERE id=?`, req.CommunityID).Scan(&fundType)
-		if _, err := glInsertTx(tx, req.Date, req.Date[:7], "business", "voucher", masterID,
-			"收益分配｜"+req.Summary, []glEntry{
-				{subject: glSlot(fundType, "pending"), project: req.CommunityID, dir: "debit", amount: amountCents},
-				{subject: glSlot(fundType, "netasset"), project: req.CommunityID, dir: "credit", amount: amountCents},
-			}, user); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "生成财务凭证失败：" + err.Error()})
-			return
-		}
+		// 财务分录统一走"按小区×日期汇总"：此处不直接插单张凭证，
+		// 由下方 generateBusinessGL 重建当日汇总（借 待分配累计收益 / 贷 维修资金），避免双重入账。
 
 		areas := make([]float64, len(targets))
 		for i, t := range targets {
@@ -1026,6 +1017,10 @@ func createVoucher(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "生成利息分配子凭证失败：" + err.Error()})
 				return
 			}
+		}
+		if err := generateBusinessGL(tx, bizGLReq{Type: "interest_alloc", Date: req.Date, CommunityID: req.CommunityID}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "生成财务凭证失败：" + err.Error()})
+			return
 		}
 		if !commitTxInvalidate(tx, c, req.Date[:7]) {
 			return
