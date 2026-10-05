@@ -5,6 +5,11 @@
 import re
 import sys
 
+# Windows 控制台/CI 默认 stdout 编码（cp1252/cp936）无法编码中文，统一改为 UTF-8 防止 print 崩溃
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
+
 
 def inline(line):
     """去除行内 Markdown 格式（粗体/斜体/代码/链接）"""

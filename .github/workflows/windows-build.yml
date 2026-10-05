@@ -43,6 +43,8 @@ jobs:
           go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .
 
       - name: 生成随包分发的 TXT 使用说明书
+        env:
+          PYTHONUTF8: '1'
         run: python scripts/md2txt.py "docs/使用说明书.md" "desktop/使用说明书.txt"
 
       - uses: actions/upload-artifact@v6
