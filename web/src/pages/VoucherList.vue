@@ -47,6 +47,8 @@
         <p style="margin-top:0">
           <b>{{ detail.no }}</b>　{{ detail.date }}
           <el-button size="small" type="primary" style="float: right" @click="printOne">打印记帐凭证</el-button>
+          <el-button v-if="detail.status === 'normal' && detail.sourceType === 'manual'" size="small" type="danger"
+            style="float: right; margin-right: 8px" @click="voidOne">作废</el-button>
         </p>
         <el-table :data="detail.entries" size="small" border>
           <el-table-column prop="summary" label="摘要" min-width="150" />
@@ -102,12 +104,16 @@ function sumAmount({ columns, data }) {
 }
 
 async function load() {
-  list.value = await api.get('/gl/vouchers', { params: { month: month.value || '', status: status.value || '' } })
+  try {
+    list.value = await api.get('/gl/vouchers', { params: { month: month.value || '', status: status.value || '' } })
+  } catch (e) { ElMessage.error('加载凭证列表失败：' + e.message) }
 }
 
 async function open(row) {
-  detail.value = await api.get(`/gl/vouchers/${row.id}`)
-  drawer.value = true
+  try {
+    detail.value = await api.get(`/gl/vouchers/${row.id}`)
+    drawer.value = true
+  } catch (e) { ElMessage.error('加载凭证详情失败：' + e.message) }
 }
 
 async function voidOne() {
@@ -153,7 +159,9 @@ function printOne() {
 }
 
 onMounted(async () => {
-  subjects.value = await api.get('/gl/subjects')
+  try {
+    subjects.value = await api.get('/gl/subjects')
+  } catch (e) { ElMessage.error('加载科目失败：' + e.message) }
   load()
 })
 </script>

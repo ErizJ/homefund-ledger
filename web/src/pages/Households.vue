@@ -6,7 +6,7 @@
       <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px">
         <el-button type="primary" size="large" @click="openCreate">＋ 新增住户</el-button>
         <el-input v-model="keyword" placeholder="搜索：户主 / 户号 / 小区 / 楼洞" style="width: 280px" size="large"
-          clearable @input="loadList" />
+          clearable @input="onKeywordInput" />
         <el-select v-model="filterCommunity" placeholder="全部小区" clearable style="width: 180px" size="large"
           @change="loadList">
           <el-option v-for="c in communities" :key="c.id" :label="c.name" :value="c.id" />
@@ -82,7 +82,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dlgVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveDlg">保存</el-button>
+        <el-button type="primary" :loading="savingDlg" @click="saveDlg">保存</el-button>
       </template>
     </el-dialog>
 
@@ -157,11 +157,20 @@ const lineTag = (t) => (linePlus(t) ? 'danger' : 'warning')
 const lineColor = (t) => (linePlus(t) ? '#a32d2d' : '#3b6d11')
 const lineSign = (t) => (linePlus(t) ? '+' : '−')
 
+let searchTimer = null
+// 搜索输入防抖：停顿 350ms 后才发请求
+function onKeywordInput() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => loadList(), 350)
+}
+
 async function loadList() {
   const params = {}
   if (filterCommunity.value) params.communityId = filterCommunity.value
   if (keyword.value.trim()) params.keyword = keyword.value.trim()
-  list.value = await api.get('/households', { params })
+  try {
+    list.value = await api.get('/households', { params })
+  } catch (e) { ElMessage.error('加载住户列表失败：' + e.message) }
 }
 
 function goImport() {
@@ -187,24 +196,32 @@ async function openEdit(row) {
 }
 
 async function loadDlgBuildings() {
-  dlgBuildings.value = dlg.value.communityId
-    ? await api.get('/buildings', { params: { communityId: dlg.value.communityId } }) : []
+  try {
+    dlgBuildings.value = dlg.value.communityId
+      ? await api.get('/buildings', { params: { communityId: dlg.value.communityId } }) : []
+  } catch (e) { ElMessage.error('加载楼洞失败：' + e.message) }
 }
+
+const savingDlg = ref(false)
 
 async function saveDlg() {
   const d = dlg.value
   try {
     if (editingId.value) {
       if (!d.area || d.area <= 0) return ElMessage.error('建筑面积必须大于 0')
+    } else {
+      if (!d.communityId || !d.buildingId) return ElMessage.error('请选择小区和楼洞')
+      if (!d.roomNo.trim()) return ElMessage.error('请填写户号')
+      if (!d.area || d.area <= 0) return ElMessage.error('建筑面积必须大于 0')
+    }
+    savingDlg.value = true
+    if (editingId.value) {
       await api.put(`/households/${editingId.value}`, {
         owner: d.owner, area: d.area,
         openingBalance: d.hasVoucher ? undefined : d.openingBalance,
       })
       ElMessage.success('住户信息已更新')
     } else {
-      if (!d.communityId || !d.buildingId) return ElMessage.error('请选择小区和楼洞')
-      if (!d.roomNo.trim()) return ElMessage.error('请填写户号')
-      if (!d.area || d.area <= 0) return ElMessage.error('建筑面积必须大于 0')
       await api.post('/households', {
         communityId: d.communityId, buildingId: d.buildingId, roomNo: d.roomNo.trim(),
         owner: d.owner?.trim(), area: d.area, openingBalance: d.openingBalance || 0,
@@ -212,19 +229,25 @@ async function saveDlg() {
       ElMessage.success(`住户「${d.roomNo.trim()}」新增成功`)
     }
     dlgVisible.value = false
-    loadList()
+    await loadList()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    savingDlg.value = false
   }
 }
 
 async function openStatement(row) {
-  stmt.value = await api.get(`/households/${row.id}/statement`)
-  stmtVisible.value = true
+  try {
+    stmt.value = await api.get(`/households/${row.id}/statement`)
+    stmtVisible.value = true
+  } catch (e) { ElMessage.error('加载收支流水失败：' + e.message) }
 }
 
 onMounted(async () => {
-  communities.value = await api.get('/communities')
+  try {
+    communities.value = await api.get('/communities')
+  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
   await loadList()
 })
 </script>

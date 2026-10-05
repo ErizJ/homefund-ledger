@@ -230,7 +230,7 @@
         <div class="panel">
           <h3>财务账 ↔ 业务台账对账
             <el-button size="small" style="margin-left: 14px" @click="loadReconcile">刷新</el-button>
-            <el-button size="small" style="margin-left: 4px" @click="doBackfill">历史补账</el-button>
+            <el-button size="small" style="margin-left: 4px" :loading="backfillBusy" @click="doBackfill">历史补账</el-button>
           </h3>
           <div class="hint" style="margin-bottom: 10px">
             对账线①：净资产（3001/3002）↔ 业务台账户账合计（期初+交存−分摊）；对账线②：待分配累计收益（3101）↔ 小区公共账（利息）。
@@ -258,7 +258,8 @@
             </el-table-column>
             <el-table-column label="期初建账" width="130" align="center">
               <template #default="{ row }">
-                <el-button v-if="!row.openingDone" size="small" type="primary" link @click="genOpening(row)">生成期初凭证</el-button>
+                <el-button v-if="!row.openingDone" size="small" type="primary" link
+                  :loading="openingBusyId === row.communityId" @click="genOpening(row)">生成期初凭证</el-button>
                 <el-tag v-else size="small" type="success">已建账</el-tag>
               </template>
             </el-table-column>
@@ -293,7 +294,11 @@ const communities = ref([])
 // ---- 总账（总分类账） ----
 const gMonth = ref(today().slice(0, 7))
 const gRows = ref([])
-function loadGLedger() { api.get('/gl/general-ledger', { params: { month: gMonth.value } }).then((d) => (gRows.value = d.rows || [])) }
+function loadGLedger() {
+  api.get('/gl/general-ledger', { params: { month: gMonth.value } })
+    .then((d) => (gRows.value = d.rows || []))
+    .catch((e) => ElMessage.error('加载总账失败：' + e.message))
+}
 function gSummary({ columns, data }) {
   const sums = ['合计', '', '', '', 0, 0, 0, 0]
   for (const r of data) { sums[4] += r.opening; sums[5] += r.debit; sums[6] += r.credit; sums[7] += r.closing }
@@ -319,6 +324,7 @@ function loadEntries() {
     params: { subject: eSubject.value || '', projectId: eProject.value || '', from: eFrom.value || '', to: eTo.value || '',
       detail: eMode.value === 'detail' ? '1' : '' },
   }).then((d) => (entries.value = d))
+    .catch((e) => ElMessage.error('加载明细账失败：' + e.message))
 }
 function groupSummary({ columns, data }) {
   const sums = ['合计', '', '', 0, 0, 0, 0]
@@ -358,40 +364,59 @@ const balanceRows = computed(() => {
   }
   return out.sort((a, b) => a.key.localeCompare(b.key))
 })
-function loadBalances() { api.get('/gl/balances', { params: { month: bMonth.value } }).then((d) => (rawBalances.value = d)) }
+function loadBalances() {
+  api.get('/gl/balances', { params: { month: bMonth.value } })
+    .then((d) => (rawBalances.value = d))
+    .catch((e) => ElMessage.error('加载科目余额表失败：' + e.message))
+}
 
 // ---- 试算与对账 ----
 const trial = ref(null)
 const reconcile = ref([])
-function loadTrial() { api.get('/gl/trial-balance').then((d) => (trial.value = d)) }
-function loadReconcile() { api.get('/gl/reconcile').then((d) => (reconcile.value = d.rows)) }
+function loadTrial() {
+  api.get('/gl/trial-balance').then((d) => (trial.value = d)).catch((e) => ElMessage.error('加载试算平衡失败：' + e.message))
+}
+function loadReconcile() {
+  api.get('/gl/reconcile').then((d) => (reconcile.value = d.rows)).catch((e) => ElMessage.error('加载对账失败：' + e.message))
+}
+
+const backfillBusy = ref(false)
+const openingBusyId = ref(0)
 
 async function doBackfill() {
+  backfillBusy.value = true
   try {
     const res = await api.post('/gl/backfill')
     const skipped = (res.skipped || []).length
     let msg = `已补齐 ${res.backfilled} 张历史凭证的财务记账凭证`
     if (skipped > 0) msg += `，另有 ${skipped} 张因所在月份已月结锁账被跳过（请先反结转再补）`
     ElMessage.success(msg)
-    loadReconcile()
+    await loadReconcile()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    backfillBusy.value = false
   }
 }
 
 async function genOpening(row) {
+  openingBusyId.value = row.communityId
   try {
     const res = await api.post('/gl/opening-balance', { communityId: row.communityId })
     ElMessage.success(`期初建账凭证已生成：¥ ${fmt(res.amount)}`)
-    loadReconcile()
+    await loadReconcile()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    openingBusyId.value = 0
   }
 }
 
 async function loadBase() {
-  subjects.value = await api.get('/gl/subjects')
-  communities.value = await api.get('/communities')
+  try {
+    subjects.value = await api.get('/gl/subjects')
+    communities.value = await api.get('/communities')
+  } catch (e) { ElMessage.error('加载基础数据失败：' + e.message) }
 }
 
 // ---- 财务报表（会住维01/02/03表，分栏式） ----
@@ -443,10 +468,18 @@ const isView = computed(() => {
 
 async function loadStatements() {
   const bsMonth = stMode.value === 'month' ? stMonth.value : stYear.value + '-12'
-  bs.value = await api.get('/gl/balance-sheet', { params: { month: bsMonth } })
-  incomeStmt.value = await api.get('/gl/income-statement',
-    { params: stMode.value === 'month' ? { month: stMonth.value } : { year: stYear.value } })
-  nas.value = await api.get('/gl/net-asset-statement', { params: { month: bsMonth } })
+  // 三张表独立加载，一张失败不影响其余
+  const [r1, r2, r3] = await Promise.allSettled([
+    api.get('/gl/balance-sheet', { params: { month: bsMonth } }),
+    api.get('/gl/income-statement', { params: stMode.value === 'month' ? { month: stMonth.value } : { year: stYear.value } }),
+    api.get('/gl/net-asset-statement', { params: { month: bsMonth } }),
+  ])
+  if (r1.status === 'fulfilled') bs.value = r1.value
+  else ElMessage.error('资产负债表加载失败：' + r1.reason.message)
+  if (r2.status === 'fulfilled') incomeStmt.value = r2.value
+  else ElMessage.error('收支表加载失败：' + r2.reason.message)
+  if (r3.status === 'fulfilled') nas.value = r3.value
+  else ElMessage.error('净资产变动表加载失败：' + r3.reason.message)
 }
 
 function stPeriod() {

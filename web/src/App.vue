@@ -4,7 +4,7 @@
   <el-container v-else style="min-height: 100vh">
     <el-aside :width="collapsed ? '64px' : '220px'" class="sidebar">
       <div class="logo-row">
-        <div v-if="!collapsed" class="logo">🏠 住房维修基金<br />记账系统</div>
+        <div v-if="!collapsed" class="logo">住房维修基金记账系统</div>
         <el-icon class="fold-btn" @click="collapsed = !collapsed">
           <Expand v-if="collapsed" />
           <Fold v-else />
@@ -132,7 +132,7 @@ body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", 
 .boot { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #9ca3af; }
 .sidebar { background: linear-gradient(180deg, #1f2937 0%, #111827 100%); display: flex; flex-direction: column; }
 .logo-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 14px 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
-.sidebar .logo { color: #fff; font-size: 15px; font-weight: 700; line-height: 1.45; }
+.sidebar .logo { color: #fff; font-size: 14px; font-weight: 700; line-height: 1.45; white-space: nowrap; }
 .fold-btn { color: #94a3b8; font-size: 18px; cursor: pointer; transition: color .15s; }
 .fold-btn:hover { color: #fff; }
 .sidebar .el-menu { border-right: none; flex: 1; padding: 8px 6px; }

@@ -445,6 +445,12 @@ import { nav } from '../store'
 const tab = ref(nav.dailyTab)
 watch(() => nav.dailyTab, (t) => { tab.value = t })
 
+// Excel 日期序列号（1900 日期系统）→ YYYY-MM-DD
+function excelDate(d) {
+  const dt = new Date(Math.round((d - 25569) * 86400 * 1000))
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
 function today() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -502,51 +508,67 @@ function resetForm(f) {
   Object.assign(f, blankForm())
   f.file = null
   expTargetCount.value = -1
-  exp.householdIds = []
+  exp.value.householdIds = []
+  // 利息分配专用字段一并清零（blankForm 未包含，避免残留上一小区的余额）
+  if (f === ial.value) Object.assign(f, { available: 0, publicOpening: 0 })
 }
 
 async function loadIncBuildings() {
-  incBuildings.value = inc.value.communityId ? await api.get('/buildings', { params: { communityId: inc.value.communityId } }) : []
-  incHouseholds.value = []
+  try {
+    incBuildings.value = inc.value.communityId ? await api.get('/buildings', { params: { communityId: inc.value.communityId } }) : []
+    incHouseholds.value = []
+  } catch (e) { ElMessage.error('加载楼洞失败：' + e.message) }
 }
 async function loadIncHouseholds() {
-  incHouseholds.value = inc.value.buildingId && inc.value.buildingId > 0
-    ? await api.get('/households', { params: { buildingId: inc.value.buildingId } }) : []
+  try {
+    incHouseholds.value = inc.value.buildingId && inc.value.buildingId > 0
+      ? await api.get('/households', { params: { buildingId: inc.value.buildingId } }) : []
+  } catch (e) { ElMessage.error('加载住户失败：' + e.message) }
 }
 function onIncHousehold() { /* 余额在住户信息区展示 */ }
 
 async function loadRfBuildings() {
-  rfBuildings.value = rf.value.communityId ? await api.get('/buildings', { params: { communityId: rf.value.communityId } }) : []
-  rfHouseholds.value = []
+  try {
+    rfBuildings.value = rf.value.communityId ? await api.get('/buildings', { params: { communityId: rf.value.communityId } }) : []
+    rfHouseholds.value = []
+  } catch (e) { ElMessage.error('加载楼洞失败：' + e.message) }
 }
 async function loadRfHouseholds() {
-  rfHouseholds.value = rf.value.buildingId && rf.value.buildingId > 0
-    ? await api.get('/households', { params: { buildingId: rf.value.buildingId } }) : []
+  try {
+    rfHouseholds.value = rf.value.buildingId && rf.value.buildingId > 0
+      ? await api.get('/households', { params: { buildingId: rf.value.buildingId } }) : []
+  } catch (e) { ElMessage.error('加载住户失败：' + e.message) }
 }
 
 async function loadExpBuildings() {
-  expBuildings.value = exp.value.communityId ? await api.get('/buildings', { params: { communityId: exp.value.communityId } }) : []
-  expSelectedPool.value = []
-  expTargetCount.value = -1
-  if (exp.value.buildingId && exp.value.buildingId !== -2) loadTargetCount()
+  try {
+    expBuildings.value = exp.value.communityId ? await api.get('/buildings', { params: { communityId: exp.value.communityId } }) : []
+    expSelectedPool.value = []
+    expTargetCount.value = -1
+    if (exp.value.buildingId && exp.value.buildingId !== -2) loadTargetCount()
+  } catch (e) { ElMessage.error('加载楼洞失败：' + e.message) }
 }
 async function onExpScopeChange() {
-  exp.householdIds = []
-  if (exp.value.buildingId === -2) {
-    expSelectedPool.value = exp.value.communityId
-      ? await api.get('/households', { params: { communityId: exp.value.communityId } }) : []
-    expTargetCount.value = expSelectedPool.value.length
-  } else {
-    loadTargetCount()
-  }
+  exp.value.householdIds = []
+  try {
+    if (exp.value.buildingId === -2) {
+      expSelectedPool.value = exp.value.communityId
+        ? await api.get('/households', { params: { communityId: exp.value.communityId } }) : []
+      expTargetCount.value = expSelectedPool.value.length
+    } else {
+      loadTargetCount()
+    }
+  } catch (e) { ElMessage.error('加载分摊住户失败：' + e.message) }
 }
 async function loadTargetCount() {
   const bid = exp.value.buildingId
   if (!exp.value.communityId) { expTargetCount.value = -1; return }
-  const rows = bid === -1
-    ? await api.get('/households', { params: { communityId: exp.value.communityId } })
-    : (bid ? await api.get('/households', { params: { buildingId: bid } }) : [])
-  expTargetCount.value = rows.length
+  try {
+    const rows = bid === -1
+      ? await api.get('/households', { params: { communityId: exp.value.communityId } })
+      : (bid ? await api.get('/households', { params: { buildingId: bid } }) : [])
+    expTargetCount.value = rows.length
+  } catch (e) { ElMessage.error('加载分摊户数失败：' + e.message) }
 }
 
 // 保存成功后统一：提示 + 传附件
@@ -614,6 +636,7 @@ async function saveExpense() {
   if (f.buildingId === -2 && (!f.householdIds || !f.householdIds.length)) return ElMessage.error('请勾选参与分摊的住户')
   if (!f.project?.trim()) return ElMessage.error('请填写维修项目')
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的金额')
+  saving.value = true
   const info = expScopeInfo()
   // 预览分摊：金额、户数、各户分摊与余额不足清单
   let pv
@@ -623,7 +646,7 @@ async function saveExpense() {
       householdIds: info.scope === 'selected' ? f.householdIds : [],
       amount: f.amount,
     })
-  } catch (e) { return ElMessage.error(e.message) }
+  } catch (e) { saving.value = false; return ElMessage.error(e.message) }
   const insuff = (pv.targets || []).filter((t) => t.deficit > 0)
   let msg = `本次维修支出：¥ ${fmt(f.amount)}\n分摊范围：${info.text}，共 ${pv.targetCount} 户`
   if (insuff.length) {
@@ -639,7 +662,7 @@ async function saveExpense() {
       cancelButtonText: '取消', type: insuff.length ? 'warning' : 'info',
       dangerouslyUseHTMLString: false,
     })
-  } catch { return }
+  } catch { saving.value = false; return }
   const summary = [f.project.trim(), f.vendor?.trim() ? '施工单位：' + f.vendor.trim() : '',
     f.remark?.trim(), '付款方式：' + f.method].filter(Boolean).join('；')
   let res
@@ -666,6 +689,7 @@ async function saveInterest() {
   if (saving.value) return
   const f = int.value
   if (!validate(f, false)) return
+  saving.value = true
   const summary = [f.bank?.trim() ? '银行：' + f.bank.trim() : '', f.remark?.trim(), '银行利息'].filter(Boolean).join('；')
   let res
   try {
@@ -683,7 +707,9 @@ async function saveInterest() {
 // ==================== 利息分配 ====================
 
 async function loadLedgerCommunities() {
-  ledgerCommunities.value = await api.get('/ledger/communities')
+  try {
+    ledgerCommunities.value = await api.get('/ledger/communities')
+  } catch (e) { ElMessage.error('加载小区公共账失败：' + e.message) }
 }
 async function onAllocCommunity() {
   const row = ledgerCommunities.value.find((c) => c.id === ial.value.communityId)
@@ -697,19 +723,20 @@ async function saveInterestAlloc() {
   if (!f.communityId) return ElMessage.error('请选择小区')
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的分配金额')
   if (Number(f.amount) > Number(f.available)) return ElMessage.error(`分配金额超过可分配公共账余额 ¥ ${fmt(f.available)}`)
+  saving.value = true
   // 预览户数
   let hhCount = 0
   try {
     const rows = await api.get('/households', { params: { communityId: f.communityId } })
     hhCount = rows.length
-  } catch (e) { return ElMessage.error(e.message) }
-  if (!hhCount) return ElMessage.error('该小区没有住户，无法分配')
+  } catch (e) { saving.value = false; return ElMessage.error(e.message) }
+  if (!hhCount) { saving.value = false; return ElMessage.error('该小区没有住户，无法分配') }
   try {
     await ElMessageBox.confirm(
       `将利息 ¥ ${fmt(f.amount)} 按建筑面积分配到「${communities.value.find((c) => c.id === f.communityId)?.name}」的 ${hhCount} 户。\n\n分配后利息从公共账转入各户分户账，是否确认？`,
       '确认利息分配', { confirmButtonText: '确认分配', cancelButtonText: '取消', type: 'info' }
     )
-  } catch { return }
+  } catch { saving.value = false; return }
   const summary = ['利息分配', f.remark?.trim()].filter(Boolean).join('：')
   let res
   try {
@@ -729,13 +756,14 @@ async function saveRefund() {
   if (saving.value) return
   const f = rf.value
   if (!validate(f, true)) return
+  saving.value = true
   const kindLabel = f.refundKind === 'destroy' ? '灭失返还' : '退返交存'
   try {
     await ElMessageBox.confirm(
       `【${kindLabel}】金额 ¥ ${fmt(f.amount)}\n户室：${rfHouse.value ? rfHouse.value.roomNo + ' ' + (rfHouse.value.owner || '') : ''}\n当前余额：¥ ${fmt(rfHouse.value?.balance || 0)}，扣减后余额：¥ ${fmt(Number(rfHouse.value?.balance || 0) - Number(f.amount))}\n\n是否确认？`,
       '确认保存', { confirmButtonText: '确认保存', cancelButtonText: '取消', type: 'warning' }
     )
-  } catch { return }
+  } catch { saving.value = false; return }
   const summary = [kindLabel, f.remark?.trim()].filter(Boolean).join('：')
   let res
   try {
@@ -760,6 +788,7 @@ async function saveOtherIncome() {
   const f = oi.value
   if (!f.communityId) return ElMessage.error('请选择小区')
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的金额')
+  saving.value = true
   const kindLabel = { business: '经营收入', disposal: '共用设施处置收入', other: '其他收入' }[f.incomeKind]
   const summary = [kindLabel, f.remark?.trim()].filter(Boolean).join('：')
   try {
@@ -767,9 +796,9 @@ async function saveOtherIncome() {
       type: 'fund_income', date: f.date, communityId: f.communityId,
       amount: f.amount, summary, incomeKind: f.incomeKind,
     })
-    ElMessage.success(`${kindLabel}保存成功！凭证号 ${res.no}，¥ ${fmt(f.amount)}`, { duration: 5000 })
     resetOtherIncome()
     await loadLedgerCommunities()
+    ElMessage.success(`${kindLabel}保存成功！凭证号 ${res.no}，¥ ${fmt(f.amount)}`, { duration: 5000 })
   } catch (e) { ElMessage.error(e.message) }
   saving.value = false
 }
@@ -779,6 +808,7 @@ async function saveCash() {
   const f = cs.value
   if (!f.communityId) return ElMessage.error('请选择小区')
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的金额')
+  saving.value = true
   const kindLabel = f.cashKind === 'withdraw' ? '提取备用金' : '备用金退回'
   const summary = [kindLabel, f.remark?.trim()].filter(Boolean).join('：')
   try {
@@ -798,6 +828,7 @@ async function saveBond() {
   if (!f.communityId) return ElMessage.error('请选择小区')
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的金额')
   if (f.bondKind === 'redeem' && Number(f.interest) < 0) return ElMessage.error('利息不能为负')
+  saving.value = true
   const kindLabel = f.bondKind === 'buy' ? '购买国债' : '国债到期兑付'
   const summary = [kindLabel, f.remark?.trim()].filter(Boolean).join('：')
   try {
@@ -878,7 +909,10 @@ async function onIncomeBatchFile(e) {
     }
     if (!json.length) throw new Error('表格没有数据行')
     const rows = json.map((r) => {
-      let d = String(r['日期'] ?? '').trim()
+      // 日期：Excel 日期单元格是序列号数字，需转换；文本则按原样匹配格式
+      let d = r['日期']
+      if (typeof d === 'number') d = excelDate(d)
+      else d = String(d ?? '').trim()
       const m = d.match(/^(\d{4})[.\-/年](\d{1,2})[.\-/月](\d{1,2})日?$/)
       if (m) d = `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
       return {
@@ -905,7 +939,7 @@ async function submitIncomeBatch() {
       `将导入 ${batchRows.value.length} 笔交存流水并逐笔生成收款凭证（合计 ¥ ${fmt(batchTotal.value)}）。\n\n存在问题的行会跳过并在结果中列出。是否继续？`,
       '确认批量导入', { confirmButtonText: '确认导入', cancelButtonText: '取消', type: 'info' }
     )
-  } catch { return }
+  } catch { saving.value = false; return }
   try {
     const res = await api.post('/vouchers/import', { rows: batchRows.value })
     let msg = `导入完成：生成凭证 ${res.inserted} 张`
@@ -921,7 +955,9 @@ async function submitIncomeBatch() {
 }
 
 onMounted(async () => {
-  communities.value = await api.get('/communities')
+  try {
+    communities.value = await api.get('/communities')
+  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
   await loadLedgerCommunities()
 })
 </script>

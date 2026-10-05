@@ -79,15 +79,22 @@ async function pickCommunity(row) {
   currentCommunity.value = row
   currentBuilding.value = null
   households.value = []
-  buildings.value = await api.get('/ledger/buildings', { params: { communityId: row.id } })
+  try {
+    buildings.value = await api.get('/ledger/buildings', { params: { communityId: row.id } })
+  } catch (e) { ElMessage.error('加载楼洞账失败：' + e.message) }
 }
 async function pickBuilding(row) {
   currentBuilding.value = row
-  households.value = await api.get('/ledger/households', { params: { buildingId: row.id } })
+  try {
+    households.value = await api.get('/ledger/households', { params: { buildingId: row.id } })
+  } catch (e) { ElMessage.error('加载住户账失败：' + e.message) }
 }
 
 async function printHouseholds() {
-  const rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
+  let rows
+  try {
+    rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
+  } catch (e) { return ElMessage.error('加载分户余额失败：' + e.message) }
   const buildings = [...new Set(rows.map((r) => r.building))]
   let total = 0
   let warnCount = 0
@@ -118,7 +125,10 @@ async function printHouseholds() {
 }
 
 async function exportHouseholds() {
-  const rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
+  let rows
+  try {
+    rows = await api.get('/reports/households', { params: { communityId: currentCommunity.value.id } })
+  } catch (e) { return ElMessage.error('加载分户余额失败：' + e.message) }
   const table = rows.map((r) => [r.building, r.roomNo, r.owner || '', r.area, r.openingBalance, r.balance,
     r.belowThreshold ? '低于首期30%' : ''])
   const total = rows.reduce((s, r) => s + Number(r.balance), 0)
@@ -162,7 +172,10 @@ function statementTableHtml(d) {
 }
 
 async function printStatement() {
-  const d = await fetchStatement()
+  let d
+  try {
+    d = await fetchStatement()
+  } catch (e) { return ElMessage.error('加载对账单失败：' + e.message) }
   printHTML(`小区对账单 ${d.community} ${d.year}`, `
     <h1>住房维修基金小区对账单</h1>
     <div class="meta">编制单位（代管）：住建局　打印时间：${new Date().toLocaleString('zh-CN')}</div>
@@ -172,7 +185,10 @@ async function printStatement() {
 }
 
 async function exportStatement() {
-  const d = await fetchStatement()
+  let d
+  try {
+    d = await fetchStatement()
+  } catch (e) { return ElMessage.error('加载对账单失败：' + e.message) }
   const rows = [
     ['小区名称', d.community],
     ['对账期间', `${d.year}-01-01 至 ${d.year}-12-31`],
@@ -193,7 +209,9 @@ async function exportStatement() {
 }
 
 onMounted(async () => {
-  communities.value = await api.get('/ledger/communities')
+  try {
+    communities.value = await api.get('/ledger/communities')
+  } catch (e) { ElMessage.error('加载小区账失败：' + e.message) }
 })
 </script>
 

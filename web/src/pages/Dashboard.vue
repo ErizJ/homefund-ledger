@@ -170,11 +170,19 @@ function fmt(n) {
 const moneyFmt = (row, col, val) => fmt(val)
 
 onMounted(async () => {
-  s.value = await api.get('/stats/dashboard')
-  monthly.value = await api.get('/summary/monthly')
-  daily.value = await api.get('/summary/daily')
-  yearly.value = await api.get('/summary/yearly')
-  recent.value = await api.get('/vouchers', { params: { limit: 8 } })
+  // 五项数据独立加载，一项失败不阻断其余，并给出失败提示
+  const jobs = [
+    ['/stats/dashboard', {}, (d) => (s.value = d)],
+    ['/summary/monthly', {}, (d) => (monthly.value = d)],
+    ['/summary/daily', {}, (d) => (daily.value = d)],
+    ['/summary/yearly', {}, (d) => (yearly.value = d)],
+    ['/vouchers', { limit: 8 }, (d) => (recent.value = d)],
+  ]
+  await Promise.all(jobs.map(async ([url, params, set]) => {
+    try {
+      set(await api.get(url, { params }))
+    } catch (e) { ElMessage.error('首页数据加载失败：' + e.message) }
+  }))
 })
 
 function sumRows(rows, key) {

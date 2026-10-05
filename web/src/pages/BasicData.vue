@@ -6,7 +6,7 @@
       <h3>Excel 户表导入</h3>
       <div style="display: flex; gap: 10px; margin-bottom: 10px">
         <el-button @click="downloadTemplate">下载导入模板(.xlsx)</el-button>
-        <el-button type="primary" @click="fileRef.click()">选择 Excel/CSV 文件导入</el-button>
+        <el-button type="primary" :loading="importing" @click="fileRef.click()">选择 Excel/CSV 文件导入</el-button>
         <input ref="fileRef" type="file" accept=".xlsx,.xls,.csv" style="display: none" @change="onFile" />
       </div>
       <div class="hint">
@@ -24,7 +24,7 @@
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button @click="addCommunity">创建小区</el-button>
+          <el-button :loading="creatingCommunity" @click="addCommunity">创建小区</el-button>
         </el-form-item>
         <el-form-item label="手工新建楼洞">
           <el-select v-model="selectedCommunity" placeholder="先选所属小区" style="width: 160px">
@@ -35,7 +35,7 @@
           <el-input v-model="newBuilding" placeholder="输入楼洞名称" style="width: 160px" />
         </el-form-item>
         <el-form-item>
-          <el-button @click="addBuilding">创建楼洞</el-button>
+          <el-button :loading="creatingBuilding" @click="addBuilding">创建楼洞</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -45,7 +45,7 @@
       <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px">
         <span class="hint">编制单位名称：</span>
         <el-input v-model="orgNameInput" style="width: 320px" placeholder="如：XX市住房保障中心（代管）" />
-        <el-button type="primary" @click="saveOrgName">保存</el-button>
+        <el-button type="primary" :loading="savingOrg" @click="saveOrgName">保存</el-button>
       </div>
       <div class="hint">用于资产负债表/收支表/净资产变动表的"编制单位"栏及打印、PDF、Excel 导出，登录后顶栏同步显示。</div>
     </div>
@@ -78,11 +78,12 @@
         </el-table-column>
         <el-table-column label="操作" width="170">
           <template #default="{ row }">
-            <el-button size="small" link type="primary" @click="openSubjectDlg(row)">编辑</el-button>
-            <el-button size="small" link :type="row.enabled ? 'warning' : 'success'" @click="toggleSubject(row)">
+            <el-button size="small" link type="primary" :loading="subjectBusyCode === row.code" @click="openSubjectDlg(row)">编辑</el-button>
+            <el-button size="small" link :type="row.enabled ? 'warning' : 'success'" :loading="subjectBusyCode === row.code"
+              @click="toggleSubject(row)">
               {{ row.enabled ? '停用' : '启用' }}
             </el-button>
-            <el-button size="small" link type="danger" @click="delSubject(row)">删除</el-button>
+            <el-button size="small" link type="danger" :loading="subjectBusyCode === row.code" @click="delSubject(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -97,7 +98,7 @@
           <el-input v-model="subjectDlg.name" placeholder="如：专项服务收入" />
         </el-form-item>
         <el-form-item label="科目类型" required>
-          <el-select v-model="subjectDlg.type" style="width: 100%">
+          <el-select v-model="subjectDlg.type" :disabled="!!subjectEditing" style="width: 100%">
             <el-option label="资产" value="asset" />
             <el-option label="负债" value="liability" />
             <el-option label="净资产" value="net_asset" />
@@ -106,14 +107,17 @@
           </el-select>
         </el-form-item>
         <el-form-item label="上级科目">
-          <el-select v-model="subjectDlg.parent" clearable placeholder="留空 = 一级科目" style="width: 100%">
+          <el-select v-model="subjectDlg.parent" :disabled="!!subjectEditing" clearable placeholder="留空 = 一级科目" style="width: 100%">
             <el-option v-for="s in topSubjects" :key="s.code" :label="s.code + ' ' + s.name" :value="s.code" />
           </el-select>
         </el-form-item>
+        <p v-if="subjectEditing" class="hint" style="margin-top: -8px">
+          编辑模式下科目类型与上级科目不可修改（已有分录的科目变更归属会影响报表口径，请新建科目或删除后重建）。
+        </p>
       </el-form>
       <template #footer>
         <el-button @click="subjectDlgVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveSubject">保存</el-button>
+        <el-button type="primary" :loading="savingSubject" @click="saveSubject">保存</el-button>
       </template>
     </el-dialog>
 
@@ -132,7 +136,7 @@
           <el-input-number v-model="settingRow.publicOpening" :min="0" :precision="2" :controls="false"
             style="width: 160px" />
           <span class="hint">元</span>
-          <el-button type="primary" @click="saveCommunitySetting">保存设置</el-button>
+          <el-button type="primary" :loading="savingCommunity" @click="saveCommunitySetting">保存设置</el-button>
         </template>
       </div>
       <div class="hint">
@@ -188,22 +192,32 @@ const subjectDlgVisible = ref(false)
 const subjectEditing = ref(null)
 const subjectDlg = ref({ code: '', name: '', type: 'asset', parent: '' })
 const TYPE_LABEL2 = { asset: '资产', liability: '负债', net_asset: '净资产', income: '收入', expense: '支出' }
+const importing = ref(false)
+const creatingCommunity = ref(false)
+const creatingBuilding = ref(false)
+const savingOrg = ref(false)
+const savingCommunity = ref(false)
+const subjectBusyCode = ref('')
+const savingSubject = ref(false)
 
 async function loadOrgName() {
   try {
     const s = await api.get('/settings')
     orgNameInput.value = s.orgName || ''
-  } catch { /* 忽略 */ }
+  } catch (e) { ElMessage.error('加载单位设置失败：' + e.message) }
 }
 
 async function saveOrgName() {
   if (!orgNameInput.value.trim()) return ElMessage.error('编制单位名称不能为空')
+  savingOrg.value = true
   try {
     const res = await api.put('/settings', { orgName: orgNameInput.value.trim() })
     orgNameInput.value = res.orgName
     ElMessage.success('编制单位已保存')
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    savingOrg.value = false
   }
 }
 
@@ -211,12 +225,16 @@ const moneyFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { m
 const numFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 async function loadBase() {
-  communities.value = await api.get('/communities')
+  try {
+    communities.value = await api.get('/communities')
+  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
 }
 async function loadHouseholdList() {
-  hhList.value = await api.get('/households', {
-    params: filterCommunity.value ? { communityId: filterCommunity.value } : {},
-  })
+  try {
+    hhList.value = await api.get('/households', {
+      params: filterCommunity.value ? { communityId: filterCommunity.value } : {},
+    })
+  } catch (e) { ElMessage.error('加载住户台账失败：' + e.message) }
 }
 
 function downloadTemplate() {
@@ -257,6 +275,7 @@ function parseCSV(text) {
 async function onFile(e) {
   const file = e.target.files[0]
   if (!file) return
+  importing.value = true
   try {
     let json = []
     if (/\.(xlsx|xls)$/i.test(file.name)) {
@@ -299,6 +318,7 @@ async function onFile(e) {
   } catch (err) {
     ElMessage.error('导入失败：' + err.message)
   } finally {
+    importing.value = false
     e.target.value = ''
   }
 }
@@ -311,22 +331,39 @@ function onSettingCommunity() {
 async function saveCommunitySetting() {
   const c = communities.value.find((x) => x.id === settingCommunity.value)
   if (!c || !settingRow.value) return
+  // 公共账期初变化会作废并重新生成该小区期初建账凭证，属覆盖型操作，先确认
+  const oldOpening = Number(c.publicOpening || 0)
+  const newOpening = Number(settingRow.value.publicOpening || 0)
+  if (oldOpening !== newOpening) {
+    try {
+      await ElMessageBox.confirm(
+        `「${c.name}」公共账期初由 ¥${fmt2(oldOpening)} 改为 ¥${fmt2(newOpening)}。\n\n已生成的期初建账凭证将按新口径作废重做（须未月结），确认保存？`,
+        '确认修改公共账期初', { type: 'warning', confirmButtonText: '确认保存', cancelButtonText: '取消' },
+      )
+    } catch { return }
+  }
+  savingCommunity.value = true
   try {
     await api.put(`/communities/${c.id}`, {
       firstRate: Number(settingRow.value.firstRate || 0),
-      publicOpening: Number(settingRow.value.publicOpening || 0),
+      publicOpening: newOpening,
     })
     ElMessage.success(`「${c.name}」设置已保存`)
     await loadBase()
     onSettingCommunity()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    savingCommunity.value = false
   }
 }
 
+const fmt2 = (n) => Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 async function addCommunity() {
   const name = newCommunity.value.trim()
-  if (!name) return
+  if (!name) return ElMessage.warning('请输入小区名称')
+  creatingCommunity.value = true
   try {
     await api.post('/communities', { name, fundType: newCommunityFundType.value })
     ElMessage.success(`小区「${name}」创建成功`)
@@ -334,18 +371,23 @@ async function addCommunity() {
     await loadBase()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    creatingCommunity.value = false
   }
 }
 
 async function addBuilding() {
   const name = newBuilding.value.trim()
   if (!selectedCommunity.value || !name) return ElMessage.warning('请先选择所属小区并输入楼洞名称')
+  creatingBuilding.value = true
   try {
     await api.post('/buildings', { communityId: selectedCommunity.value, name })
     ElMessage.success(`楼洞「${name}」创建成功`)
     newBuilding.value = ''
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    creatingBuilding.value = false
   }
 }
 
@@ -363,7 +405,9 @@ async function delHousehold(row) {
 }
 
 async function loadSubjects() {
-  subjectList.value = await api.get('/gl/subjects')
+  try {
+    subjectList.value = await api.get('/gl/subjects')
+  } catch (e) { ElMessage.error('加载科目失败：' + e.message) }
 }
 const topSubjects = computed(() => subjectList.value.filter((x) => !x.parent))
 
@@ -381,26 +425,31 @@ function openSubjectDlg(row) {
 async function saveSubject() {
   const d = subjectDlg.value
   if (!d.code || !d.name) return ElMessage.error('科目编码和名称不能为空')
+  savingSubject.value = true
   try {
     if (subjectEditing.value) {
       const row = subjectEditing.value
-      await api.put(`/gl/subjects/${row.code}`, { name: d.name, code: d.code, type: d.type, parent: d.parent || '' })
+      // 编辑只允许改编码/名称（改编码后端做分录级联迁移）；类型与上级科目已在表单禁用
+      await api.put(`/gl/subjects/${row.code}`, { name: d.name, code: d.code })
       ElMessage.success(`科目 ${d.code} 已更新`)
     } else {
       await api.post('/gl/subjects', { code: d.code, name: d.name, type: d.type, parent: d.parent || '' })
       ElMessage.success(`科目 ${d.code} 已新增（报表将自动包含该科目行）`)
     }
     subjectDlgVisible.value = false
-    loadSubjects()
+    await loadSubjects()
   } catch (e) { ElMessage.error('保存科目失败：' + e.message) }
+  finally { savingSubject.value = false }
 }
 
 async function toggleSubject(row) {
+  subjectBusyCode.value = row.code
   try {
     await api.put(`/gl/subjects/${row.code}`, { enabled: !row.enabled })
     ElMessage.success(row.enabled ? `科目 ${row.code} 已停用` : `科目 ${row.code} 已启用`)
-    loadSubjects()
+    await loadSubjects()
   } catch (e) { ElMessage.error(e.message) }
+  finally { subjectBusyCode.value = '' }
 }
 
 async function delSubject(row) {
@@ -408,11 +457,13 @@ async function delSubject(row) {
     await ElMessageBox.confirm(
       `确认删除科目 ${row.code} ${row.name}？已有分录的科目不能删除（请改为停用）。`, '删除科目', { type: 'warning' })
   } catch { return }
+  subjectBusyCode.value = row.code
   try {
     await api.delete(`/gl/subjects/${row.code}`)
     ElMessage.success(`科目 ${row.code} 已删除`)
-    loadSubjects()
+    await loadSubjects()
   } catch (e) { ElMessage.error('删除失败：' + e.message) }
+  finally { subjectBusyCode.value = '' }
 }
 
 onMounted(async () => { await loadBase(); await loadHouseholdList(); await loadOrgName(); await loadSubjects() })

@@ -198,9 +198,11 @@ const attFileRef = ref(null)
 
 async function openAtt(row) {
   attVoucher.value = row
-  const detail = await api.get(`/vouchers/${row.id}`)
-  attList.value = detail.attachments || []
-  attVisible.value = true
+  try {
+    const detail = await api.get(`/vouchers/${row.id}`)
+    attList.value = detail.attachments || []
+    attVisible.value = true
+  } catch (e) { ElMessage.error('加载附件失败：' + e.message) }
 }
 
 async function onAttFile(e) {
@@ -227,16 +229,22 @@ function downloadAtt(row) {
 
 async function deleteAtt(row) {
   try {
+    await ElMessageBox.confirm(`确认删除附件「${row.filename}」？删除后不可恢复。`, '删除附件', { type: 'warning' })
+  } catch { return }
+  try {
     await api.delete(`/attachments/${row.id}`)
     ElMessage.success('已删除')
-    openAtt(attVoucher.value)
+    await openAtt(attVoucher.value)
   } catch (e) {
     ElMessage.error(e.message)
   }
 }
 
 async function printVoucher(row) {
-  const d = await api.get(`/vouchers/${row.id}`)
+  let d
+  try {
+    d = await api.get(`/vouchers/${row.id}`)
+  } catch (e) { return ElMessage.error('加载凭证详情失败：' + e.message) }
   const title = `记账凭证 ${d.no}`
   let allocHtml = ''
   if ((d.type === 'expense' || d.type === 'interest_alloc') && d.allocations?.length) {
@@ -306,7 +314,10 @@ async function printClassicVoucher(row) {
 
 // 分户分摊通知单：每户一张，一页一户
 async function printNotices(row) {
-  const d = await api.get(`/vouchers/${row.id}`)
+  let d
+  try {
+    d = await api.get(`/vouchers/${row.id}`)
+  } catch (e) { return ElMessage.error('加载凭证详情失败：' + e.message) }
   if (!d.allocations?.length) {
     ElMessage.warning('该凭证没有分摊明细')
     return
@@ -361,31 +372,39 @@ const moneyFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { m
 const tagType = (t) => ({ income: 'danger', expense: 'success', interest: 'primary', allocate: 'warning', refund: 'danger', interest_alloc: 'primary', interest_alloc_child: 'primary', fund_income: 'primary', cash: 'info', bond: 'primary' }[t] || 'info')
 
 async function loadBase() {
-  communities.value = await api.get('/communities')
+  try {
+    communities.value = await api.get('/communities')
+  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
 }
 function onTypeChange() {
   form.value.buildingId = null
   form.value.householdId = null
 }
 async function loadBuildings() {
-  buildings.value = form.value.communityId ? await api.get('/buildings', { params: { communityId: form.value.communityId } }) : []
+  try {
+    buildings.value = form.value.communityId ? await api.get('/buildings', { params: { communityId: form.value.communityId } }) : []
+  } catch (e) { ElMessage.error('加载楼洞失败：' + e.message) }
 }
 async function loadHouseholds() {
-  households.value = form.value.buildingId && form.value.buildingId > 0
-    ? await api.get('/households', { params: { buildingId: form.value.buildingId } }) : []
+  try {
+    households.value = form.value.buildingId && form.value.buildingId > 0
+      ? await api.get('/households', { params: { buildingId: form.value.buildingId } }) : []
+  } catch (e) { ElMessage.error('加载住户失败：' + e.message) }
 }
 async function loadList() {
-  list.value = await api.get('/vouchers', { params: { month: fMonth.value || '', type: fType.value || '' } })
+  try {
+    list.value = await api.get('/vouchers', { params: { month: fMonth.value || '', type: fType.value || '' } })
+  } catch (e) { ElMessage.error('加载凭证列表失败：' + e.message) }
 }
 
 async function submit() {
   if (submitting.value) return
   const f = form.value
   if (!f.communityId) return ElMessage.error('请选择小区')
-  submitting.value = true
   if (!f.amount || f.amount <= 0) return ElMessage.error('请输入正确的金额')
   if ((f.type === 'income' || f.type === 'refund') && (!f.buildingId || !f.householdId)) return ElMessage.error('该类型必须选择楼洞和户室')
   if (f.type === 'expense' && !f.buildingId) return ElMessage.error('维修支出请选择楼洞，或选「全体楼洞」做小区级支出')
+  submitting.value = true
   try {
     const res = await api.post('/vouchers', {
       type: f.type, date: f.date, communityId: f.communityId,
@@ -399,7 +418,8 @@ async function submit() {
     const allocMsg = f.type === 'expense' || f.type === 'interest_alloc' ? `，已分摊到 ${res.allocations} 户` : ''
     ElMessage.success(`凭证 ${res.no} 记账成功${allocMsg}`)
     f.amount = null; f.summary = ''; f.householdId = null
-    loadList()
+    glVoucherCache = null // 新凭证会使财务汇总凭证变化，清空打印缓存
+    await loadList()
   } catch (e) {
     ElMessage.error(e.message)
   }
@@ -423,7 +443,8 @@ async function voidVoucher(row) {
   try {
     const res = await api.post(`/vouchers/${row.id}/void`, { reason })
     ElMessage.success(res.voidedChildren ? `已作废主凭证及 ${res.voidedChildren} 张分摊子凭证` : '已作废')
-    loadList()
+    glVoucherCache = null // 作废会使财务汇总凭证变化，清空打印缓存
+    await loadList()
   } catch (e) {
     ElMessage.error(e.message)
   }

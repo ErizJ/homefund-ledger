@@ -80,7 +80,7 @@
       </h3>
       <div style="margin-bottom: 12px; display: flex; gap: 10px; align-items: center">
         <el-date-picker v-model="reportMonth" type="month" value-format="YYYY-MM" placeholder="选择月份" style="width: 160px" />
-        <el-button size="small" type="primary" @click="genReport">生成 / 重新生成</el-button>
+        <el-button size="small" type="primary" :loading="busy" @click="genReport">生成 / 重新生成</el-button>
         <span class="hint">反结转改账后，请重新生成对应月份的报表</span>
       </div>
       <el-table :data="reports" size="small" border>
@@ -134,9 +134,15 @@ const isClosed = computed(() => periods.value.some((p) => p.month === month.valu
 const isYearLocked = computed(() => years.value.some((y) => y.year === curYear.value))
 const summaryRows = computed(() => (summary.value ? summary.value.rows : []))
 
-async function loadPeriods() { periods.value = await api.get('/periods') }
-async function loadYears() { years.value = await api.get('/periods/years') }
-async function loadReports() { reports.value = await api.get('/reports/monthly') }
+async function loadPeriods() {
+  try { periods.value = await api.get('/periods') } catch (e) { ElMessage.error('加载结转记录失败：' + e.message) }
+}
+async function loadYears() {
+  try { years.value = await api.get('/periods/years') } catch (e) { ElMessage.error('加载年度结转记录失败：' + e.message) }
+}
+async function loadReports() {
+  try { reports.value = await api.get('/reports/monthly') } catch (e) { ElMessage.error('加载月报表列表失败：' + e.message) }
+}
 
 // 期间/年度操作统一包装：loading + 成功/失败提示由各调用方完成
 async function withBusy(fn) {
@@ -149,8 +155,10 @@ async function withBusy(fn) {
   }
 }
 async function loadSummary() {
-  const params = sumMode.value === 'month' ? { month: month.value } : { year: month.value.slice(0, 4) }
-  summary.value = await api.get('/gl/voucher-summary', { params })
+  try {
+    const params = sumMode.value === 'month' ? { month: month.value } : { year: month.value.slice(0, 4) }
+    summary.value = await api.get('/gl/voucher-summary', { params })
+  } catch (e) { ElMessage.error('加载凭证汇总失败：' + e.message) }
 }
 
 function sumSummary({ columns, data }) {
@@ -171,26 +179,6 @@ async function doTransfer() {
       ElMessage.success(`月末结转成功！结转凭证 ${res.no} 已生成并过账`)
       loadSummary()
     } catch (e) { ElMessage.error('月末结转失败：' + e.message) }
-  })
-}
-
-async function closePeriod() {
-  try {
-    await ElMessageBox.confirm(
-      `对 ${month.value} 执行月末结转：收入/支出转入净资产，生成结转凭证（不锁账，改账后需重新结转）。是否执行？`, '月末结转确认', { type: 'warning' })
-  } catch { return }
-  await withBusy(async () => {
-    try {
-      const res = await api.post('/periods/close', { month: month.value })
-      let msg = `${month.value} 结转成功`
-      if (res.report) msg += `；月报表：${res.report}`
-      if (res.statementReport) msg += `；财务报表快照：${res.statementReport}`
-      if (res.reportError || res.statementReportError) {
-        msg += `；注意：${res.reportError || ''}${res.statementReportError || ''}`
-        ElMessage.warning(msg)
-      } else ElMessage.success(msg, { duration: 8000 })
-      loadPeriods(); loadReports(); loadSummary()
-    } catch (e) { ElMessage.error('结转失败：' + e.message) }
   })
 }
 
@@ -271,11 +259,23 @@ function exportSummary() {
 }
 
 async function genReport() {
-  try {
-    const res = await api.post('/reports/monthly', { month: reportMonth.value || month.value })
-    ElMessage.success(`月报表生成成功：${res.name}`)
-    loadReports()
-  } catch (e) { ElMessage.error('月报表生成失败：' + e.message) }
+  const m = reportMonth.value || month.value
+  // 同月已有报表时属于覆盖重生成，先确认（文件名含月份）
+  const exist = reports.value.some((r) => (r.name || '').includes(m))
+  if (exist) {
+    try {
+      await ElMessageBox.confirm(
+        `${m} 已生成过月报表，重新生成将覆盖原文件。确认覆盖？`, '重新生成月报表',
+        { type: 'warning', confirmButtonText: '确认覆盖', cancelButtonText: '取消' })
+    } catch { return }
+  }
+  await withBusy(async () => {
+    try {
+      const res = await api.post('/reports/monthly', { month: m })
+      ElMessage.success(`月报表生成成功：${res.name}`)
+      await loadReports()
+    } catch (e) { ElMessage.error('月报表生成失败：' + e.message) }
+  })
 }
 function downloadReport(row) {
   window.open(`/api/reports/monthly/file?name=${encodeURIComponent(row.name)}`, '_blank')

@@ -67,7 +67,7 @@
       <div class="ops">
         <el-button @click="addRow">+ 添加一行</el-button>
         <span class="hint">每行只填借方或贷方一边金额；至少一借一贷两行</span>
-        <el-button type="primary" size="large" style="margin-left: auto" :disabled="!balanced" @click="save">保存并过账</el-button>
+        <el-button type="primary" size="large" style="margin-left: auto" :disabled="!balanced" :loading="saving" @click="save">保存并过账</el-button>
       </div>
     </div>
 
@@ -112,7 +112,11 @@ const balanced = computed(() =>
   validRows.value.every((r) => !(Number(r.debit) > 0 && Number(r.credit) > 0)) &&
   Math.abs(totalDebit.value - totalCredit.value) < 0.005)
 
+const saving = ref(false)
+
 async function save() {
+  if (saving.value) return
+  saving.value = true
   try {
     const res = await api.post('/gl/manual-voucher', {
       date: date.value,
@@ -159,6 +163,8 @@ async function save() {
     reset()
   } catch (e) {
     ElMessage.error(e.message)
+  } finally {
+    saving.value = false
   }
 }
 

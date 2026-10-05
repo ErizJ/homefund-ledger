@@ -27,6 +27,15 @@ func Run(dbPath string, port int, www fs.FS) error {
 		return fmt.Errorf("打开数据库失败: %w", err)
 	}
 
+	r := buildRouter(www)
+
+	log.Printf("服务已启动: http://127.0.0.1:%d", port)
+	return r.Run(fmt.Sprintf("127.0.0.1:%d", port))
+}
+
+// buildRouter 构建完整路由（www 非 nil 时托管前端静态资源，SPA 回退 index.html）。
+// 独立成函数便于用 httptest 覆盖桌面版静态托管路径。
+func buildRouter(www fs.FS) *gin.Engine {
 	r := gin.Default()
 	r.Use(corsMiddleware())
 
@@ -120,7 +129,5 @@ func Run(dbPath string, port int, www fs.FS) error {
 	if www != nil {
 		r.NoRoute(spaHandler(www))
 	}
-
-	log.Printf("服务已启动: http://127.0.0.1:%d", port)
-	return r.Run(fmt.Sprintf("127.0.0.1:%d", port))
+	return r
 }
