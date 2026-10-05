@@ -25,7 +25,7 @@ go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .     
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .   # macOS/Linux 交叉编译（已验证）
 ```
 
-交付 = `vfund.exe` + 首次运行自动生成的 `data/` 目录；老用户升级只替换 exe。
+交付 = `vfund.exe` + 首次运行自动生成的 `data/` 目录；老用户升级只替换 exe。随包附 **使用说明书 TXT**（源码为 [../docs/使用说明书.md](../docs/使用说明书.md)，CI 出包时经 scripts/md2txt.py 自动转 TXT 附带）。
 
 ### 重新生成图标 / 版本资源
 

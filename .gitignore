@@ -28,3 +28,6 @@ web/vite.config.js.timestamp-*.mjs
 desktop/vfund.exe
 desktop/webdist/dist/*
 !desktop/webdist/dist/.gitkeep
+
+# 随包分发的 TXT 说明书（构建时由 md 生成）
+desktop/使用说明书.txt

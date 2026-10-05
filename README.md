@@ -151,7 +151,7 @@ go build -o vfund-server .
 
 ```
 vfund-ledger/
-├── docs/                     # 文档（桌面版打包与同步指南）
+├── docs/                     # 文档（桌面版打包与同步指南、用户使用说明书）
 ├── scripts/
 │   └── e2e_test.py           # 端到端全流程验收测试
 ├── .github/workflows/
