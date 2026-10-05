@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">银行对账</h2>
+    <ReloadBanner :failed="loadFailed" @retry="load" />
 
     <div class="panel">
       <h3>导入银行流水</h3>
@@ -78,6 +79,7 @@ import { ref, onMounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 
 const TYPE_LABEL = {
   income: '缴纳收入', expense: '维修支出', interest: '利息收入', allocate: '分摊到户',
@@ -94,6 +96,7 @@ const candidates = ref([])
 const importing = ref(false)
 const matchLoading = ref(false)
 const matchingId = ref(0)
+const loadFailed = ref(false)
 
 const fmt = (n) => Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const moneyFmt = (row, col, val) => fmt(val)
@@ -102,6 +105,31 @@ const moneyFmt = (row, col, val) => fmt(val)
 function excelDate(d) {
   const dt = new Date(Math.round((d - 25569) * 86400 * 1000))
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+// 引号感知的 CSV 解析：字段含逗号/换行（引号包裹）时正确切分
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+  const rows = []
+  let cur = [], field = '', inQuote = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inQuote) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++ } else inQuote = false
+      } else field += ch
+    } else if (ch === '"') inQuote = true
+    else if (ch === ',') { cur.push(field); field = '' }
+    else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++
+      cur.push(field); field = ''
+      if (cur.some((v) => v !== '')) rows.push(cur)
+      cur = []
+    } else field += ch
+  }
+  cur.push(field)
+  if (cur.some((v) => v !== '')) rows.push(cur)
+  return rows
 }
 
 async function load() {
@@ -113,7 +141,9 @@ async function load() {
       matched: all.filter((x) => x.status === 'matched').length,
       ignored: all.filter((x) => x.status === 'ignored').length,
     }
+    loadFailed.value = false
   } catch (e) {
+    loadFailed.value = true
     ElMessage.error('加载流水失败：' + e.message)
   }
 }
@@ -134,17 +164,17 @@ async function onFile(e) {
       if (text.includes('�')) {
         try { text = new TextDecoder('gbk').decode(buf) } catch { /* utf-8 */ }
       }
-      const rows = text.split(/\r?\n/).filter((r) => r.trim())
+      // 引号感知解析：摘要含英文逗号（引号包裹）时不会错列
+      const rows = parseCSV(text)
       if (rows.length < 2) throw new Error('没有数据行')
-      const header = rows[0].split(',').map((h) => h.trim())
+      const header = rows[0].map((h) => h.trim())
       const iD = header.findIndex((h) => h.includes('日期'))
       const iA = header.findIndex((h) => h.includes('金额'))
       const iS = header.findIndex((h) => h.includes('摘要'))
       if (iD < 0 || iA < 0) throw new Error('缺少列头：日期/金额')
-      json = rows.slice(1).map((r) => {
-        const cols = r.split(',')
-        return { 日期: cols[iD], 金额: parseFloat(cols[iA]), 摘要: iS >= 0 ? cols[iS] : '' }
-      })
+      json = rows.slice(1).map((r) => ({
+        日期: r[iD] ?? '', 金额: parseFloat(r[iA] ?? 0), 摘要: iS >= 0 ? r[iS] ?? '' : '',
+      }))
     }
     const rows = json.map((r) => {
       // 日期：Excel 日期单元格是序列号数字，需转换；文本则按原样匹配格式

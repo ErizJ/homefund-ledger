@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 8px">四级账簿</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
     <div class="hint" style="margin-bottom: 14px">
       层级：一级总账 → 二级小区 → 三级楼洞 → 四级住户。点击小区行查看楼洞，点击楼洞行查看住户；小区公共账余额 = 利息收入等未分摊项。
     </div>
@@ -61,6 +62,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printHTML, fmtMoney } from '../print'
 import { exportExcel } from '../export'
 
@@ -208,11 +210,19 @@ async function exportStatement() {
   exportExcel(`小区对账单 ${d.community} ${d.year}.xlsx`, '小区对账单', ['项目', '金额/内容'], rows)
 }
 
-onMounted(async () => {
+const loadFailed = ref(false)
+
+async function init() {
+  loadFailed.value = false
   try {
     communities.value = await api.get('/ledger/communities')
-  } catch (e) { ElMessage.error('加载小区账失败：' + e.message) }
-})
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载小区账失败：' + e.message)
+  }
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

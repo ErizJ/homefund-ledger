@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">基础数据</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <div class="panel">
       <h3>Excel 户表导入</h3>
@@ -175,6 +176,7 @@ import { ref, computed, onMounted } from 'vue'
 import * as XLSX from 'xlsx'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 
 const communities = ref([])
 const hhList = ref([])
@@ -199,12 +201,17 @@ const savingOrg = ref(false)
 const savingCommunity = ref(false)
 const subjectBusyCode = ref('')
 const savingSubject = ref(false)
+const loadFailed = ref(false)
+const failLoad = (label) => (e) => {
+  loadFailed.value = true
+  ElMessage.error(label + '：' + e.message)
+}
 
 async function loadOrgName() {
   try {
     const s = await api.get('/settings')
     orgNameInput.value = s.orgName || ''
-  } catch (e) { ElMessage.error('加载单位设置失败：' + e.message) }
+  } catch (e) { failLoad('加载单位设置失败')(e) }
 }
 
 async function saveOrgName() {
@@ -227,14 +234,14 @@ const numFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { min
 async function loadBase() {
   try {
     communities.value = await api.get('/communities')
-  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
+  } catch (e) { failLoad('加载小区失败')(e) }
 }
 async function loadHouseholdList() {
   try {
     hhList.value = await api.get('/households', {
       params: filterCommunity.value ? { communityId: filterCommunity.value } : {},
     })
-  } catch (e) { ElMessage.error('加载住户台账失败：' + e.message) }
+  } catch (e) { failLoad('加载住户台账失败')(e) }
 }
 
 function downloadTemplate() {
@@ -407,7 +414,7 @@ async function delHousehold(row) {
 async function loadSubjects() {
   try {
     subjectList.value = await api.get('/gl/subjects')
-  } catch (e) { ElMessage.error('加载科目失败：' + e.message) }
+  } catch (e) { failLoad('加载科目失败')(e) }
 }
 const topSubjects = computed(() => subjectList.value.filter((x) => !x.parent))
 
@@ -466,7 +473,12 @@ async function delSubject(row) {
   finally { subjectBusyCode.value = '' }
 }
 
-onMounted(async () => { await loadBase(); await loadHouseholdList(); await loadOrgName(); await loadSubjects() })
+async function init() {
+  loadFailed.value = false
+  await Promise.all([loadBase(), loadHouseholdList(), loadOrgName(), loadSubjects()])
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

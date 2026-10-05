@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">日常录入</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <el-tabs v-model="tab">
       <!-- ==================== 录入收款 ==================== -->
@@ -440,6 +441,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import * as XLSX from 'xlsx'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { nav } from '../store'
 
 const tab = ref(nav.dailyTab)
@@ -706,10 +708,15 @@ async function saveInterest() {
 
 // ==================== 利息分配 ====================
 
+const loadFailed = ref(false)
+
 async function loadLedgerCommunities() {
   try {
     ledgerCommunities.value = await api.get('/ledger/communities')
-  } catch (e) { ElMessage.error('加载小区公共账失败：' + e.message) }
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载小区公共账失败：' + e.message)
+  }
 }
 async function onAllocCommunity() {
   const row = ledgerCommunities.value.find((c) => c.id === ial.value.communityId)
@@ -954,12 +961,18 @@ async function submitIncomeBatch() {
   saving.value = false
 }
 
-onMounted(async () => {
+async function init() {
+  loadFailed.value = false
   try {
     communities.value = await api.get('/communities')
-  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载小区失败：' + e.message)
+  }
   await loadLedgerCommunities()
-})
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

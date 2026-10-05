@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">凭证记账</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
     <div class="panel">
       <h3>新增凭证</h3>
       <el-form :model="form" label-width="90px" inline>
@@ -181,6 +182,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printHTML, printVoucher as printPaperVoucher, fmtMoney } from '../print'
 import { exportExcel } from '../export'
 
@@ -371,10 +373,15 @@ const submitting = ref(false)
 const moneyFmt = (row, col, val) => Number(val || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const tagType = (t) => ({ income: 'danger', expense: 'success', interest: 'primary', allocate: 'warning', refund: 'danger', interest_alloc: 'primary', interest_alloc_child: 'primary', fund_income: 'primary', cash: 'info', bond: 'primary' }[t] || 'info')
 
+const loadFailed = ref(false)
+
 async function loadBase() {
   try {
     communities.value = await api.get('/communities')
-  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载小区失败：' + e.message)
+  }
 }
 function onTypeChange() {
   form.value.buildingId = null
@@ -394,7 +401,11 @@ async function loadHouseholds() {
 async function loadList() {
   try {
     list.value = await api.get('/vouchers', { params: { month: fMonth.value || '', type: fType.value || '' } })
-  } catch (e) { ElMessage.error('加载凭证列表失败：' + e.message) }
+    loadFailed.value = false
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载凭证列表失败：' + e.message)
+  }
 }
 
 async function submit() {
@@ -450,7 +461,12 @@ async function voidVoucher(row) {
   }
 }
 
-onMounted(() => { loadBase(); loadList() })
+async function init() {
+  loadFailed.value = false
+  await Promise.all([loadBase(), loadList()])
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

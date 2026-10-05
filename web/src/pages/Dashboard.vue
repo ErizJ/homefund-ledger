@@ -4,6 +4,7 @@
       <h2 style="margin: 0">首页</h2>
       <span class="today">今天：{{ todayText }}</span>
     </div>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <!-- ==================== 日常录入快捷入口 ==================== -->
     <div class="quick-cards">
@@ -143,6 +144,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printHTML, fmtMoney } from '../print'
 import { exportExcel } from '../export'
 import { nav, goDaily } from '../store'
@@ -169,8 +171,11 @@ function fmt(n) {
 }
 const moneyFmt = (row, col, val) => fmt(val)
 
-onMounted(async () => {
-  // 五项数据独立加载，一项失败不阻断其余，并给出失败提示
+const loadFailed = ref(false)
+
+async function init() {
+  loadFailed.value = false
+  // 五项数据独立加载，一项失败不阻断其余，并给出失败提示与重试入口
   const jobs = [
     ['/stats/dashboard', {}, (d) => (s.value = d)],
     ['/summary/monthly', {}, (d) => (monthly.value = d)],
@@ -181,9 +186,14 @@ onMounted(async () => {
   await Promise.all(jobs.map(async ([url, params, set]) => {
     try {
       set(await api.get(url, { params }))
-    } catch (e) { ElMessage.error('首页数据加载失败：' + e.message) }
+    } catch (e) {
+      loadFailed.value = true
+      ElMessage.error('首页数据加载失败：' + e.message)
+    }
   }))
-})
+}
+
+onMounted(init)
 
 function sumRows(rows, key) {
   return rows.reduce((t, r) => t + Number(r[key] || 0), 0)

@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">账簿查询（财会〔2020〕7号 · 收付实现制 · 借贷记账法）</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <el-tabs v-model="tab">
       <!-- ==================== 总账（总分类账） ==================== -->
@@ -277,6 +278,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printHTML } from '../print'
 import { exportExcel } from '../export'
 import { nav } from '../store'
@@ -292,12 +294,18 @@ const subjects = ref([])
 const communities = ref([])
 
 // ---- 总账（总分类账） ----
+const loadFailed = ref(false)
+const failLoad = (label) => (e) => {
+  loadFailed.value = true
+  ElMessage.error(label + '：' + e.message)
+}
+
 const gMonth = ref(today().slice(0, 7))
 const gRows = ref([])
 function loadGLedger() {
-  api.get('/gl/general-ledger', { params: { month: gMonth.value } })
+  return api.get('/gl/general-ledger', { params: { month: gMonth.value } })
     .then((d) => (gRows.value = d.rows || []))
-    .catch((e) => ElMessage.error('加载总账失败：' + e.message))
+    .catch(failLoad('加载总账失败'))
 }
 function gSummary({ columns, data }) {
   const sums = ['合计', '', '', '', 0, 0, 0, 0]
@@ -320,11 +328,11 @@ const eFrom = ref('')
 const eTo = ref('')
 const entries = ref([])
 function loadEntries() {
-  api.get('/gl/entries', {
+  return api.get('/gl/entries', {
     params: { subject: eSubject.value || '', projectId: eProject.value || '', from: eFrom.value || '', to: eTo.value || '',
       detail: eMode.value === 'detail' ? '1' : '' },
   }).then((d) => (entries.value = d))
-    .catch((e) => ElMessage.error('加载明细账失败：' + e.message))
+    .catch(failLoad('加载明细账失败'))
 }
 function groupSummary({ columns, data }) {
   const sums = ['合计', '', '', 0, 0, 0, 0]
@@ -365,19 +373,19 @@ const balanceRows = computed(() => {
   return out.sort((a, b) => a.key.localeCompare(b.key))
 })
 function loadBalances() {
-  api.get('/gl/balances', { params: { month: bMonth.value } })
+  return api.get('/gl/balances', { params: { month: bMonth.value } })
     .then((d) => (rawBalances.value = d))
-    .catch((e) => ElMessage.error('加载科目余额表失败：' + e.message))
+    .catch(failLoad('加载科目余额表失败'))
 }
 
 // ---- 试算与对账 ----
 const trial = ref(null)
 const reconcile = ref([])
 function loadTrial() {
-  api.get('/gl/trial-balance').then((d) => (trial.value = d)).catch((e) => ElMessage.error('加载试算平衡失败：' + e.message))
+  return api.get('/gl/trial-balance').then((d) => (trial.value = d)).catch(failLoad('加载试算平衡失败'))
 }
 function loadReconcile() {
-  api.get('/gl/reconcile').then((d) => (reconcile.value = d.rows)).catch((e) => ElMessage.error('加载对账失败：' + e.message))
+  return api.get('/gl/reconcile').then((d) => (reconcile.value = d.rows)).catch(failLoad('加载对账失败'))
 }
 
 const backfillBusy = ref(false)
@@ -416,7 +424,7 @@ async function loadBase() {
   try {
     subjects.value = await api.get('/gl/subjects')
     communities.value = await api.get('/communities')
-  } catch (e) { ElMessage.error('加载基础数据失败：' + e.message) }
+  } catch (e) { failLoad('加载基础数据失败')(e) }
 }
 
 // ---- 财务报表（会住维01/02/03表，分栏式） ----
@@ -475,11 +483,11 @@ async function loadStatements() {
     api.get('/gl/net-asset-statement', { params: { month: bsMonth } }),
   ])
   if (r1.status === 'fulfilled') bs.value = r1.value
-  else ElMessage.error('资产负债表加载失败：' + r1.reason.message)
+  else failLoad('资产负债表加载失败')(r1.reason)
   if (r2.status === 'fulfilled') incomeStmt.value = r2.value
-  else ElMessage.error('收支表加载失败：' + r2.reason.message)
+  else failLoad('收支表加载失败')(r2.reason)
   if (r3.status === 'fulfilled') nas.value = r3.value
-  else ElMessage.error('净资产变动表加载失败：' + r3.reason.message)
+  else failLoad('净资产变动表加载失败')(r3.reason)
 }
 
 function stPeriod() {
@@ -600,15 +608,15 @@ function exportNAS() {
   exportExcel(`净资产变动表-${d.title}.xlsx`, '会住维03表', ['项目', ...d.cols], rows)
 }
 
-onMounted(() => {
-  loadBase()
-  loadGLedger()
-  loadEntries()
-  loadBalances()
-  loadTrial()
-  loadReconcile()
-  loadStatements()
-})
+async function init() {
+  loadFailed.value = false
+  await Promise.all([
+    loadBase(), loadGLedger(), loadEntries(), loadBalances(),
+    loadTrial(), loadReconcile(), loadStatements(),
+  ])
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">期末业务</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <!-- 期间与操作 -->
     <div class="panel">
@@ -116,6 +117,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printHTML } from '../print'
 import { exportExcel } from '../export'
 
@@ -134,14 +136,20 @@ const isClosed = computed(() => periods.value.some((p) => p.month === month.valu
 const isYearLocked = computed(() => years.value.some((y) => y.year === curYear.value))
 const summaryRows = computed(() => (summary.value ? summary.value.rows : []))
 
+const loadFailed = ref(false)
+const failLoad = (label) => (e) => {
+  loadFailed.value = true
+  ElMessage.error(label + '：' + e.message)
+}
+
 async function loadPeriods() {
-  try { periods.value = await api.get('/periods') } catch (e) { ElMessage.error('加载结转记录失败：' + e.message) }
+  try { periods.value = await api.get('/periods') } catch (e) { failLoad('加载结转记录失败')(e) }
 }
 async function loadYears() {
-  try { years.value = await api.get('/periods/years') } catch (e) { ElMessage.error('加载年度结转记录失败：' + e.message) }
+  try { years.value = await api.get('/periods/years') } catch (e) { failLoad('加载年度结转记录失败')(e) }
 }
 async function loadReports() {
-  try { reports.value = await api.get('/reports/monthly') } catch (e) { ElMessage.error('加载月报表列表失败：' + e.message) }
+  try { reports.value = await api.get('/reports/monthly') } catch (e) { failLoad('加载月报表列表失败')(e) }
 }
 
 // 期间/年度操作统一包装：loading + 成功/失败提示由各调用方完成
@@ -158,7 +166,7 @@ async function loadSummary() {
   try {
     const params = sumMode.value === 'month' ? { month: month.value } : { year: month.value.slice(0, 4) }
     summary.value = await api.get('/gl/voucher-summary', { params })
-  } catch (e) { ElMessage.error('加载凭证汇总失败：' + e.message) }
+  } catch (e) { failLoad('加载凭证汇总失败')(e) }
 }
 
 function sumSummary({ columns, data }) {
@@ -281,7 +289,12 @@ function downloadReport(row) {
   window.open(`/api/reports/monthly/file?name=${encodeURIComponent(row.name)}`, '_blank')
 }
 
-onMounted(() => { loadPeriods(); loadYears(); loadReports(); loadSummary() })
+async function init() {
+  loadFailed.value = false
+  await Promise.all([loadPeriods(), loadYears(), loadReports(), loadSummary()])
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

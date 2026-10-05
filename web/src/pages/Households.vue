@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">住户管理</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <div class="panel">
       <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 14px">
@@ -132,6 +133,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { nav } from '../store'
 
 const communities = ref([])
@@ -164,13 +166,19 @@ function onKeywordInput() {
   searchTimer = setTimeout(() => loadList(), 350)
 }
 
+const loadFailed = ref(false)
+
 async function loadList() {
   const params = {}
   if (filterCommunity.value) params.communityId = filterCommunity.value
   if (keyword.value.trim()) params.keyword = keyword.value.trim()
   try {
     list.value = await api.get('/households', { params })
-  } catch (e) { ElMessage.error('加载住户列表失败：' + e.message) }
+    loadFailed.value = false
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载住户列表失败：' + e.message)
+  }
 }
 
 function goImport() {
@@ -244,12 +252,18 @@ async function openStatement(row) {
   } catch (e) { ElMessage.error('加载收支流水失败：' + e.message) }
 }
 
-onMounted(async () => {
+async function init() {
+  loadFailed.value = false
   try {
     communities.value = await api.get('/communities')
-  } catch (e) { ElMessage.error('加载小区失败：' + e.message) }
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载小区失败：' + e.message)
+  }
   await loadList()
-})
+}
+
+onMounted(init)
 </script>
 
 <style scoped>

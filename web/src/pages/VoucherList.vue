@@ -1,6 +1,7 @@
 <template>
   <div>
     <h2 style="margin: 0 0 16px">凭证查询</h2>
+    <ReloadBanner :failed="loadFailed" @retry="init" />
 
     <div class="panel">
       <div class="filters">
@@ -82,6 +83,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import ReloadBanner from '../components/ReloadBanner.vue'
 import { printVoucher } from '../print'
 
 const month = ref('')
@@ -103,10 +105,16 @@ function sumAmount({ columns, data }) {
   return sums.map((v, i) => (i === 4 ? fmt(v) : v))
 }
 
+const loadFailed = ref(false)
+
 async function load() {
   try {
     list.value = await api.get('/gl/vouchers', { params: { month: month.value || '', status: status.value || '' } })
-  } catch (e) { ElMessage.error('加载凭证列表失败：' + e.message) }
+    loadFailed.value = false
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载凭证列表失败：' + e.message)
+  }
 }
 
 async function open(row) {
@@ -158,12 +166,18 @@ function printOne() {
   })
 }
 
-onMounted(async () => {
+async function init() {
+  loadFailed.value = false
   try {
     subjects.value = await api.get('/gl/subjects')
-  } catch (e) { ElMessage.error('加载科目失败：' + e.message) }
-  load()
-})
+  } catch (e) {
+    loadFailed.value = true
+    ElMessage.error('加载科目失败：' + e.message)
+  }
+  await load()
+}
+
+onMounted(init)
 </script>
 
 <style scoped>
