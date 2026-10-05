@@ -32,10 +32,10 @@
 | 返还/退返 | 灭失返还（借 返还支出 / 贷 银行）、退返交存（冲减交存收入），均减少该户余额 |
 | 其他收入 | 经营收入(4201) / 共用设施处置收入(4301) / 其他收入(4901)，计入公共账可分配收益 |
 | 备用金 | 提取/退回（1201）；维修支出支持"备用金"付款方式 |
-| 国债投资 | 购买（借 国债投资 / 贷 国债专户）、到期兑付（本金+利息，利息计入国债利息收入并同步挂业务凭证） |
+| 国债投资 | 购买（借 国债投资 / 贷 国债专户）、到期兑付（本金+利息，利息计入国债利息收入） |
 
 - 每笔业务凭证记录**制单人**；作废须填**原因**、记录作废人，留痕不删除
-- 手工收款 10 分钟内同户同日同金额同摘要判重拦截；所有保存按钮带 loading 防连点
+- 手工收款 10 分钟内同户同日同金额同摘要判重拦截；全部写操作带 loading 防连点、成功/失败均有提示，危险操作有确认框
 
 ## 二、财务账套（财会〔2020〕7号）
 
@@ -48,6 +48,7 @@
 支出：5001 维修支出（500101 工程维修费 / 500102 监理费 / 500103 检测费、勘察设计费 / 500104 其他维修相关费用）、5101 返还支出、5901 其他支出
 
 - **科目自定义**：基础数据页可新增/改名/改编码（分录级联迁移）/停用/删除；一级科目自动出现在三张财务报表，子科目编码 = 上级+01/02 自动归入商品/公房分栏
+- 编辑已有科目时类型与上级科目不可修改（变更归属会影响报表口径与已有分录）
 
 ### 记账凭证（按小区×日期汇总）
 
@@ -78,11 +79,12 @@
 
 ## 三、其他功能
 
-- **银行对账**：导入流水（Excel/CSV），按同金额找候选凭证人工匹配，未达账项标记
+- **银行对账**：导入流水（Excel/CSV，支持银行日期单元格），按同金额找候选凭证人工匹配，未达账项标记
 - **分户余额表 / 小区对账单**：打印与 Excel 导出（对账单按年度，供与业委会核对）
 - **30% 续筹红线**：按"首期交存标准 × 面积"计算，余额低于 30% 的户在住户管理/四级账簿/分户余额表标红
 - **基础数据导入**：Excel/CSV 导入住户（含期初余额）、模板下载、手工建小区/楼洞、小区设置（首期标准/公共账期初）、编制单位设置、会计科目管理
 - **登录**：单用户账号密码（默认 admin/admin，可用 VFUND_USER/VFUND_PASS 覆盖），24 小时会话 Cookie，页面顶栏显示用户与编制单位
+- **交互保障**：所有按钮成功/失败均有提示、防重复提交；页面加载失败显示重试横幅；搜索防抖
 
 ## 四、启动方式
 
@@ -104,7 +106,7 @@ npm install   # 依赖丢失时
 npm run dev
 ```
 
-浏览器打开 **http://127.0.0.1:5173**（开发模式自动代理 `/api` 到 8080）。
+浏览器打开 http://127.0.0.1:5173 （开发模式自动代理 `/api` 到 8080）。
 
 ### 3. （可选）重新编译后端
 
@@ -121,7 +123,12 @@ go build -o vfund-server .
 4. **报表**：账簿查询 → 财务报表（三张表 + PDF/打印/Excel）；四级账簿 → 分户余额表/对账单
 5. **财务账套启用**：试算与对账 → 按小区生成期初凭证 → 历史补账 → 日常自动汇总记账
 
-## 六、数据备份
+## 六、测试
+
+- **单元/集成测试**：`cd server && go test ./...`（账务口径、聚合凭证、结转、编号断号、作废留痕、判重、SPA 托管等）
+- **端到端全流程验收**：`python3 scripts/e2e_test.py` —— 在独立临时库上自动模拟两小区（商品/公房）完整账务周期（建账→期初→收款/批量导入→支出分摊→利息/经营/备用金/国债→利息分配→返还退返→银行对账→科目自定义→手工凭证→作废→月末/年度结转与反结转→三张报表/试算/勾稽/红线/诊断），76 项断言核对数据流转与最终状态，跑完即毁、不碰真实数据。也可外部起服后 `VFUND_E2E_CLIENT=1 python3 scripts/e2e_test.py`
+
+## 七、数据备份
 
 所有数据 = 数据库文件 + 附件目录：
 
@@ -131,44 +138,62 @@ go build -o vfund-server .
 
 恢复 = 文件放回原位重启后端。
 
-## 七、桌面版（Windows）打包与同步
+## 八、桌面版（Windows）
 
-本仓库采用"一套代码、两种运行方式"：日常开发保持前后端分离，交付使用时打包成纯 Windows 桌面软件（Wails 窗口 + 内嵌后端，数据在 exe 旁 `data/` 目录）。开发完成后的同步流程、开发守则、自动打包配置见 **[docs/桌面版同步指南.md](docs/桌面版同步指南.md)**。
+本仓库采用"一套代码、两种运行方式"：日常开发保持前后端分离，交付使用时打包成纯 Windows 桌面软件（Wails 原生窗口 + 内嵌后端与前端，数据在 exe 旁 `data/` 目录，升级只替换 exe）。
 
-## 八、目录结构
+- 构建：`cd desktop && go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .`（macOS/Linux 交叉编译已验证；打包前需 `cp -R web/dist desktop/webdist/dist`）
+- GitHub Actions 自动出包：打 `v*` 标签即在 windows-latest 上自动构建并上传 artifact
+- 窗口图标/版本信息由 `desktop/resource_windows_amd64.syso` 提供（图标用 `desktop/tools/genicon` 重新生成）
+- 同步流程与开发守则见 **[docs/桌面版同步指南.md](docs/桌面版同步指南.md)**
+
+## 九、目录结构
 
 ```
 vfund-ledger/
-├── docs/                    # 文档（桌面版打包与同步指南）
-├── desktop/                 # 桌面版（Windows）壳：内嵌后端+前端，打包成独立 exe
-│   └── main.go              # Wails 窗口 + 启动内嵌 gin 服务（数据在 exe 旁 data/）
-├── server/                  # Go 后端
-│   ├── main.go              # 命令行入口（开发模式）
-│   └── app/                 # 业务代码库（命令行与桌面版共用）
-│       ├── app.go           # Run()：启动完整服务
-│       ├── main.go          # 建表、迁移
-│       ├── auth.go          # 登录/会话
-│       ├── settings.go      # 编制单位等设置
-│       ├── handlers.go      # 基础数据/业务凭证/批量导入/作废
-│       ├── ledger.go        # 四级账、汇总、对账单
-│       ├── gl.go            # 科目/汇总记账凭证/结转/总账/明细账
-│       ├── subjects_crud.go # 会计科目自定义管理
-│       ├── periods.go       # 月末/年度结转与反结转
-│       ├── statements.go    # 会住维01/02/03表（分栏式、诊断）
-│       ├── statements_snapshot.go # 月结/年结财务报表快照 Excel
-│       ├── pdf_statement.go # 三张报表 PDF 生成（嵌入 Noto Sans SC）
-│       ├── report.go        # 月报表 Excel
-│       ├── bank.go          # 银行对账、分户余额表
-│       ├── attachments.go   # 附件上传下载
-│       ├── assets/fonts/    # PDF 中文字体
-│       └── vfund.db         # SQLite 数据库（运行后生成，不入库）
-└── web/                     # Vue3 前端
+├── docs/                     # 文档（桌面版打包与同步指南）
+├── scripts/
+│   └── e2e_test.py           # 端到端全流程验收测试
+├── .github/workflows/
+│   └── windows-build.yml     # Windows 桌面版自动出包
+├── desktop/                  # 桌面版（Windows）壳：内嵌后端+前端，打包成独立 exe
+│   ├── main.go               # Wails 窗口 + 启动内嵌 gin 服务（数据在 exe 旁 data/）
+│   ├── fatal_windows.go      # Windows 致命错误弹窗（无控制台模式下错误可见）
+│   ├── icon.ico              # 窗口图标（tools/genicon 生成）
+│   ├── versioninfo.json      # exe 版本信息
+│   ├── app.manifest          # 高清屏 DPI 感知 manifest
+│   ├── resource_windows_amd64.syso  # 图标/版本/manifest 编译进 exe
+│   ├── tools/genicon/        # 图标生成小工具
+│   └── webdist/dist/         # 前端构建产物（打包前从 web/dist 拷贝，不入库）
+├── server/                   # Go 后端
+│   ├── main.go               # 命令行入口（开发模式）
+│   ├── vfund.db              # SQLite 数据库（运行后生成，不入库）
+│   └── app/                  # 业务代码库（命令行与桌面版共用）
+│       ├── app.go            # Run()：启动完整服务
+│       ├── main.go           # 建表、迁移
+│       ├── auth.go           # 登录/会话
+│       ├── settings.go       # 编制单位等设置
+│       ├── handlers.go       # 基础数据/业务凭证/批量导入/作废
+│       ├── ledger.go         # 四级账、汇总、对账单
+│       ├── gl.go             # 科目/汇总记账凭证/结转/总账/明细账
+│       ├── subjects_crud.go  # 会计科目自定义管理
+│       ├── periods.go        # 月末/年度结转与反结转
+│       ├── statements.go     # 会住维01/02/03表（分栏式、诊断）
+│       ├── statements_snapshot.go  # 月结/年结财务报表快照 Excel
+│       ├── pdf_statement.go  # 三张报表 PDF 生成（嵌入 Noto Sans SC）
+│       ├── report.go         # 月报表 Excel
+│       ├── bank.go           # 银行对账、分户余额表
+│       ├── attachments.go    # 附件上传下载
+│       └── assets/fonts/     # PDF 中文字体
+└── web/                      # Vue3 前端
+    ├── public/favicon.ico    # 浏览器标签页图标（与桌面版同一图标）
     └── src/
-        ├── App.vue          # 布局/菜单/登录门
-        ├── pages/           # Dashboard/DailyEntry/Households/Ledger/Vouchers/
-        │                    # VoucherEntry/VoucherList/PeriodEnd/GLBooks/Bank/BasicData/LoginPage
-        ├── store.js         # 跨页导航与登录状态
-        ├── api.js           # axios 封装（Cookie 会话、401 处理）
-        ├── print.js         # 打印工具
-        └── export.js        # Excel 导出工具
+        ├── App.vue           # 布局/菜单/登录门
+        ├── components/       # 通用组件（加载失败重试横幅等）
+        ├── pages/            # Dashboard/DailyEntry/Households/Ledger/Vouchers/
+        │                     # VoucherEntry/VoucherList/PeriodEnd/GLBooks/Bank/BasicData/LoginPage
+        ├── store.js          # 跨页导航与登录状态
+        ├── api.js            # axios 封装（Cookie 会话、401 处理）
+        ├── print.js          # 打印工具
+        └── export.js         # Excel 导出工具
 ```
