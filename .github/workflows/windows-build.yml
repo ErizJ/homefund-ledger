@@ -37,10 +37,10 @@ jobs:
           Remove-Item -Recurse -Force desktop/webdist/dist -ErrorAction SilentlyContinue
           Copy-Item -Recurse -Force web/dist desktop/webdist/dist
 
-      - name: 打包 exe（图标/版本信息由已提交的 resource_windows_amd64.syso 提供）
+      - name: 打包 exe（desktop,production 为 Wails 必需构建标签；图标/版本信息由已提交的 syso 提供）
         run: |
           cd desktop
-          go build -ldflags "-H=windowsgui" -o vfund.exe .
+          go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .
 
       - uses: actions/upload-artifact@v6
         with:

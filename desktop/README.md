@@ -18,10 +18,11 @@
 cd web && npm run build
 cp -R web/dist desktop/webdist/dist        # Windows 下用文件管理器复制覆盖亦可
 
-# 2. 打包（-H=windowsgui 隐藏控制台；图标/版本信息由已提交的 resource_windows_amd64.syso 自动链接）
+# 2. 打包（desktop,production 为 Wails 必需构建标签，缺了运行会弹"build tags"错误；
+#    -H=windowsgui 隐藏控制台；图标/版本信息由已提交的 resource_windows_amd64.syso 自动链接）
 cd desktop
-go build -ldflags "-H=windowsgui" -o vfund.exe .                    # Windows 机器上
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-H=windowsgui" -o vfund.exe .   # macOS/Linux 交叉编译（已验证）
+go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .                    # Windows 机器上
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags "desktop,production" -ldflags "-H=windowsgui" -o vfund.exe .   # macOS/Linux 交叉编译（已验证）
 ```
 
 交付 = `vfund.exe` + 首次运行自动生成的 `data/` 目录；老用户升级只替换 exe。
