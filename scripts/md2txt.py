@@ -6,6 +6,15 @@ import re
 import sys
 
 
+def inline(line):
+    """去除行内 Markdown 格式（粗体/斜体/代码/链接）"""
+    line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
+    line = re.sub(r'\*(.+?)\*', r'\1', line)
+    line = re.sub(r'`(.+?)`', r'\1', line)
+    line = re.sub(r'\[(.+?)\]\([^)]+\)', r'\1', line)
+    return line
+
+
 def convert(text):
     out = []
     in_code = False
@@ -24,22 +33,19 @@ def convert(text):
             cells = [c.strip() for c in line.strip('|').split('|')]
             if cells and all(set(c) <= set('-: ') for c in cells):
                 continue
-            out.append('  ' + ' | '.join(cells))
+            out.append('  ' + ' | '.join(inline(c) for c in cells))
             continue
         # 标题：去掉 # 号，一级标题加下划线
         m = re.match(r'^(#{1,6})\s*(.*)$', line)
         if m:
             level, title = len(m.group(1)), m.group(2).strip()
-            out.append(title)
+            out.append(inline(title))
             if level <= 2:
                 out.append('=' * len(title))
             continue
         # 引用、行内格式
         line = re.sub(r'^>\s?', '　', line)
-        line = re.sub(r'\*\*(.+?)\*\*', r'\1', line)
-        line = re.sub(r'`(.+?)`', r'\1', line)
-        line = re.sub(r'\[(.+?)\]\([^)]+\)', r'\1', line)
-        out.append(line)
+        out.append(inline(line))
     # 压缩连续空行
     text = '\n'.join(out)
     text = re.sub(r'\n{3,}', '\n\n', text)
