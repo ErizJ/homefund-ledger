@@ -83,9 +83,13 @@ def start_server():
     global SERVER, TMP
     TMP = tempfile.mkdtemp(prefix='vfund-e2e-')
     db = os.path.join(TMP, 'vfund.db')
+    # 安全守卫：只允许使用本脚本创建的临时库，绝不允许连到真实库
+    # （曾因漏传 db 参数导致 go run 默认打开真实库，此处强制双保险）
+    if not db.startswith(tempfile.gettempdir()):
+        raise RuntimeError(f'拒绝在临时目录之外启动测试服务器：{db}')
     env = dict(os.environ, VFUND_PORT='8099')
     logf = open(os.path.join(TMP, 'server.log'), 'w')
-    SERVER = subprocess.Popen(['go', 'run', '.'], cwd='../server', env=env,
+    SERVER = subprocess.Popen(['go', 'run', '.', db], cwd='../server', env=env,
                               stdout=logf, stderr=subprocess.STDOUT)
     api = Api()
     for _ in range(90):
@@ -375,7 +379,9 @@ def main():
 
 if __name__ == '__main__':
     if os.environ.get('VFUND_E2E_CLIENT') == '1':
-        # 客户端模式：服务器已由外部启动（沙箱环境不允许脚本派生监听端口的子进程）
+        # 客户端模式：服务器已由外部启动（沙箱环境不允许脚本派生监听端口的子进程）。
+        # 注意：此模式连接的 8099 服务必须是临时库，请勿指向真实数据库！
+        print('【提醒】客户端模式：请确认 8099 服务运行在临时库上，切勿使用真实数据库')
         sys.exit(main())
     start_server()
     try:
