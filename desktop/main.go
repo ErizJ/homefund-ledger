@@ -62,6 +62,13 @@ func main() {
 		fatal("加载前端资源失败: %v", err)
 	}
 
+	// 兼容检查：Win10 部分机器缺 WebView2 运行时（wails 窗口依赖），
+	// 缺失时弹中文提示并引导安装官方组件，而不是抛出一段英文错误
+	if !webView2Installed() {
+		showWebView2MissingDialog()
+		os.Exit(0)
+	}
+
 	// 后端：gin 托管前端静态资源 + /api（同一来源，登录 Cookie 与接口零改动）
 	port := freePort()
 	go func() {
